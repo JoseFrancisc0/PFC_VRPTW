@@ -24,3 +24,25 @@ No se aplicaron al proyecto puesto que el análisis se realizó sobre el promedi
 
 ### Abandonado / Próximo a eliminar
 * `DQN_Pipeline`: archivos residuales de una prueba con DQN.
+
+### Nota de ejecución de pruebas
+
+Tres pasadas:
+
+1. Pasada de calidad en paralelo
+
+```
+python automate.py quality --benchmark ../solomon-100 --master ../res2/master_quality.csv --iters 25000 --runs 10 --workers 8
+```
+
+2. Pasada de tiempos
+
+```
+python automate.py timing --benchmark ../solomon-100 --master ../res2/master_timing.csv --iters 25000 --timing-runs 3
+```
+
+3. Pasada individual
+
+```
+python automate.py trace --instance ../GH-200/rc2/rc204.txt --algo QLEARNING --run 7 --seed 7
+```

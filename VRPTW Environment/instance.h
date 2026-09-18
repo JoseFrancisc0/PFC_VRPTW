@@ -59,13 +59,13 @@ class Instance {
         std::vector<std::vector<bool>> is_reachable;
 
         Instance(const std::string& path) {
-            loadSolomon(path);
+            loadInstance(path);
             precomputeDistances();
             precomputeFeasibility();
         }
     
     private:
-        void loadSolomon(const std::string& path);
+        void loadInstance(const std::string& path);
         void precomputeDistances();
         void precomputeFeasibility();
 };

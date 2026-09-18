@@ -44,8 +44,8 @@ void Route::recalculate(const Instance& inst) {
     }
 }   
 
-// Cargar instancia desde el benchmark de Solomon
-void Instance::loadSolomon(const std::string& path) {
+// Cargar instancia desde el benchmark
+void Instance::loadInstance(const std::string& path) {
     std::ifstream file(path);
 
     if (!file.is_open())

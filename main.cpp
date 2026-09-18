@@ -92,34 +92,54 @@ int main(int argc, char** argv) {
             int max_iters = std::stoi(argv[3]);
             std::string run_id = (argc >= 5) ? argv[4] : "0";
 
-            unsigned seed = (argc >= 6) ? parse_seed(argv[5], parse_seed(run_id, 1u))
-                                        : parse_seed(run_id, 1u);
+            bool trace = false;
+            for (int i = 4; i < argc; ++i)
+                if (std::string(argv[i]) == "--trace")
+                    trace = true;
+
+            unsigned seed = (argc >= 6 && std::string(argv[5]) != "--trace") 
+                                ? parse_seed(argv[5], parse_seed(run_id, 1u))
+                                : parse_seed(run_id, 1u);
             rng.seed(seed);
 
             Instance inst(instance_file);
             Solution initial_sol(inst);
+            Solution best = initial_sol;
 
             size_t last_slash = instance_file.find_last_of("/\\");
             size_t last_dot = instance_file.find_last_of(".");
             std::string inst_name = instance_file.substr(last_slash + 1, last_dot - last_slash - 1);
             
-            std::string metrics_file = "../Results/" + algorithm + "/metrics/" + algorithm + "_" + inst_name + "_metrics_run" + run_id + ".csv";
-            std::string routes_file = "../Results/" + algorithm + "/routes/" + algorithm + "_" + inst_name + "_metrics_run" + run_id + ".csv";
+            std::string metrics_file = "";
+            if (trace)
+                metrics_file = "../Results/" + algorithm + "/metrics/" + algorithm + "_" + inst_name + "_metrics_run" + run_id + ".csv";
             
             double start_cpu = get_cpu_time();
 
             if (algorithm == "CLASSIC")
-                solve_with_classic(inst, initial_sol, max_iters, metrics_file, routes_file);
+                best = solve_with_classic(inst, initial_sol, max_iters, metrics_file);
             else if (algorithm == "QLEARNING")
-                solve_with_qlearning(inst, initial_sol, max_iters, metrics_file, routes_file);
+                best = solve_with_qlearning(inst, initial_sol, max_iters, metrics_file);
             else {
                 std::cerr << "Algoritmo desconocido: " << algorithm << "\n";
                 return 1;
             }
 
             double cpu_time_used = get_cpu_time() - start_cpu;
-            std::cout << "[INFO] Seed: " << seed << "\n";
+            bool is_valid = verifySolution(inst, best);
+
+            std::cout << "RESULT"
+                      << ";instance=" << inst_name
+                      << ";algorithm=" << algorithm
+                      << ";seed=" << seed
+                      << ";run=" << run_id
+                      << ";best_veh=" << best.used_vehicles
+                      << ";best_dist=" << best.total_distance
+                      << ";cpu_time=" << cpu_time_used
+                      << ";valid="     << (is_valid ? 1 : 0)
+                      << "\n";
             std::cout << "Tiempo de CPU real: " << cpu_time_used << " segundos\n";
+
 
         } catch (const std::exception& e) {
             std::cerr << "ERROR FATAL: " << e.what() << "\n";

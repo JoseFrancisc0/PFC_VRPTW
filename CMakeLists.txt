@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10.0)
+cmake_minimum_required(VERSION 3.13.0)
 project(ALNS_VRPTW VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -15,6 +15,7 @@ add_executable(ALNS_VRPTW
                Utils/utils.cpp)
 
 target_compile_options(ALNS_VRPTW PRIVATE "-O3")
+target_link_options(ALNS_VRPTW PRIVATE -static -static-libgcc -static-libstdc++)
 
 include(CTest)
 enable_testing()

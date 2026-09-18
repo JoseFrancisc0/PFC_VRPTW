@@ -132,6 +132,6 @@ void Solution::generateInitialSolution() {
 
 // Calcular costos de solucion
 double cost(const Solution& sol) {
-    const double VEHICLE_COST = 10000.0;
+    const double VEHICLE_COST = 50000.0;
     return (sol.used_vehicles * VEHICLE_COST) + sol.total_distance;
 }

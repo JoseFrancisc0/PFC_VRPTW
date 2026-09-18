@@ -2,9 +2,9 @@
 #include <iostream>
 #include <fstream>
 
-extern std::mt19937 rng; 
+extern std::mt19937 rng;
 
-ALNS_QLearning::ALNS_QLearning(const Instance& _inst, const Solution& _initial_sol) 
+ALNS_QLearning::ALNS_QLearning(const Instance& _inst, const Solution& _initial_sol)
     : inst(_inst), current_sol(_initial_sol), best_sol(_initial_sol) {
     initOps();
 }
@@ -36,81 +36,112 @@ int ALNS_QLearning::selectOp(const std::vector<double>& q_values, double epsilon
     }
 }
 
-bool ALNS_QLearning::accept(const Solution& cand, const Solution& curr, double T) {
-    const double SA_VEH_PENALTY = 1e7;
-    double delta =    (cand.used_vehicles - curr.used_vehicles) * SA_VEH_PENALTY
-                    + (cand.total_distance - curr.total_distance);
-    
-    if (delta <= 0) return true;
-
-    double prob = std::exp(-delta / T);
-    std::uniform_real_distribution<double> distr(0.0, 1.0);
-    return distr(rng) < prob; 
+double ALNS_QLearning::objectiveScore(int vehicles, double distance) const {
+    return (vehicles * W_VEH) + (100.0 * distance / ref_dist);
 }
 
-Solution ALNS_QLearning::solve(int max_iters, bool save_metrics) {
+double ALNS_QLearning::improvement(int ref_veh, double ref_val, const Solution& cand) const {
+    return objectiveScore(ref_veh, ref_val) -
+           objectiveScore(cand.used_vehicles, cand.total_distance);
+}
+
+Outcome ALNS_QLearning::evaluateCandidate(const Solution& cand, double T) const {
+    double cand_cost = cost(cand);
+
+    if (cand_cost < cost(best_sol)) return Outcome::NEW_BEST;
+    if (cand_cost < cost(current_sol)) return Outcome::IMPROVED;
+
+    std::uniform_real_distribution<double> distr(0.0, 1.0);
+    int d_veh = cand.used_vehicles - current_sol.used_vehicles;
+
+    if (d_veh == 0) {
+        double delta = cand.total_distance - current_sol.total_distance;
+        if (delta <= 0.0) return Outcome::ACCEPTED_SA;
+        if (distr(rng) < std::exp(-delta / T)) return Outcome::ACCEPTED_SA;
+        return Outcome::REJECTED;
+    }
+
+    double p = (P_VEH_INCREASE * (T / start_temp)) / static_cast<double>(d_veh);
+    if (distr(rng) < p) return Outcome::ACCEPTED_SA;
+    return Outcome::REJECTED;
+}
+
+Solution ALNS_QLearning::solve(int max_iters, bool save_history) {
     double initial_d = current_sol.total_distance;
-    start_temp = -(0.10 * initial_d) / std::log(0.5);
+
+    ref_dist = std::max(initial_d, 1.0);
+    start_temp = -(START_TEMP_FRAC * initial_d) / std::log(0.5);
     double T = start_temp;
-    
+
+    cooling_rate = std::pow(T_END_RATIO, 1.0 / std::max(1, max_iters));
+
     double epsilon = 1.0;
-    double epsilon_decay = 0.998; 
-    double epsilon_min = 0.15; 
-    
-    double eta = 0.8; 
-    double C = 100.0; 
+    double epsilon_min = 0.15;
+    double eps_horizon = std::max(1.0, EPS_DECAY_FRAC * max_iters);
+    double epsilon_decay = std::pow(epsilon_min, 1.0 / eps_horizon);
+
     double opportunity_cost = 0.0;
 
-    int current_state = 0; 
+    int current_state = 0;
     int n_customers = inst.clients.size() - 1;
-    
-    if (save_metrics) { history.reserve(max_iters); }
+
+    if (save_history) history.reserve(max_iters);
 
     const int Q_FLOOR_CAP = 30;
     const int Q_MAX_CAP   = 60;
-
     int q_min = std::min(Q_FLOOR_CAP, std::max(4, static_cast<int>(0.10 * n_customers)));
     int q_max = std::min(Q_MAX_CAP,   std::max(q_min + 1, static_cast<int>(0.40 * n_customers)));
-        q_max = std::max(q_max, q_min + 1);
+    q_max = std::max(q_max, q_min + 1);
     std::uniform_int_distribution<int> q_distr(q_min, q_max);
 
     for (int iter = 1; iter <= max_iters; ++iter) {
         Solution candidate = current_sol;
         int q = q_distr(rng);
-        
+
         int d_idx = selectOp(Q_table_D[current_state], epsilon);
         int r_idx = selectOp(Q_table_R[current_state], epsilon);
-        
+
         destroy_ops[d_idx](candidate, q);
         repair_ops[r_idx](candidate);
-        
-        double cand_cost = cost(candidate);
-        double curr_cost = cost(current_sol);
-        double best_cost = cost(best_sol);
 
-        double delta_global = std::max((best_cost - cand_cost) / best_cost, 0.0);
-        double delta_local  = std::max((curr_cost - cand_cost) / curr_cost, 0.0);
-        double delta_improvement = (delta_global * eta) + (delta_local * (1.0 - eta));
-        
-        opportunity_cost = std::max(opportunity_cost, delta_improvement);
+        // --- 1. Que hizo realmente el ALNS con este candidato ---
+        Outcome outcome = evaluateCandidate(candidate, T);
 
-        double reward = 0.0;
-        int next_state = 0;
+        // --- 2. Magnitud de la mejora, en puntos objetivo ---
+        double g = std::max(improvement(best_sol.used_vehicles, best_sol.total_distance, candidate), 0.0);
+        double l = improvement(current_sol.used_vehicles, current_sol.total_distance, candidate);
+        if (l < 0.0) l *= LAMBDA_WORSE;
 
-        if (delta_improvement > 0) {
-            reward = (delta_improvement * iter) / C;
-            next_state = 1; 
-        } else {
-            reward = ((delta_improvement - opportunity_cost) * iter) / C;
-            next_state = 0; 
+        double delta_improvement = (eta * g) + ((1.0 - eta) * l);
+
+        // --- 3. Recompensa = magnitud + bono por evento - coste de oportunidad ---
+        double reward = delta_improvement;
+        bool improved = (outcome == Outcome::NEW_BEST || outcome == Outcome::IMPROVED);
+
+        switch (outcome) {
+            case Outcome::NEW_BEST:    reward += R_NEW_BEST;  break;
+            case Outcome::IMPROVED:    reward += R_IMPROVED;  break;
+            case Outcome::ACCEPTED_SA: reward += R_ACCEPTED;  break;
+            case Outcome::REJECTED:    reward += R_REJECTED;  break;
         }
 
-        if (cand_cost < best_cost) {
+        if (!improved) reward -= OC_WEIGHT * opportunity_cost;
+
+        reward = std::max(-R_CLIP, std::min(R_CLIP, reward));
+
+        opportunity_cost = ((1.0 - OC_RATE) * opportunity_cost) +
+                           (OC_RATE * std::max(delta_improvement, 0.0));
+
+        // --- 4. Aplicar el movimiento ---
+        if (outcome == Outcome::NEW_BEST) {
             best_sol = candidate;
             current_sol = candidate;
-        } else if (cand_cost < curr_cost || accept(candidate, current_sol, T)) {
+        } else if (outcome != Outcome::REJECTED) {
             current_sol = candidate;
         }
+
+        // --- 5. Update Q-Learning (2 estados, 2 tablas) ---
+        int next_state = improved ? 1 : 0;
 
         double max_next_q_D = *std::max_element(Q_table_D[next_state].begin(), Q_table_D[next_state].end());
         double max_next_q_R = *std::max_element(Q_table_R[next_state].begin(), Q_table_R[next_state].end());
@@ -118,9 +149,7 @@ Solution ALNS_QLearning::solve(int max_iters, bool save_metrics) {
         Q_table_D[current_state][d_idx] += alpha * (reward + gamma * max_next_q_D - Q_table_D[current_state][d_idx]);
         Q_table_R[current_state][r_idx] += alpha * (reward + gamma * max_next_q_R - Q_table_R[current_state][r_idx]);
 
-        current_state = next_state;
-
-        if (save_metrics) {
+        if (save_history) {
             IterationDataQL data;
             data.iter = iter;
             data.best_vehicles = best_sol.used_vehicles;
@@ -129,20 +158,19 @@ Solution ALNS_QLearning::solve(int max_iters, bool save_metrics) {
             data.curr_distance = current_sol.total_distance;
             data.d_idx = d_idx;
             data.r_idx = r_idx;
-            data.reward = reward; 
+            data.reward = reward;
             data.temp = T;
             data.epsilon = epsilon;
-            data.state = current_state;
-            data.q_d_state0 = Q_table_D[0];
-            data.q_d_state1 = Q_table_D[1];
-            data.q_r_state0 = Q_table_R[0];
-            data.q_r_state1 = Q_table_R[1];
+            data.outcome = static_cast<int>(outcome);
+            data.opportunity_cost = opportunity_cost;
             history.emplace_back(data);
         }
-    
-        T = T * cooling_rate; 
-        epsilon = std::max(epsilon_min, epsilon * epsilon_decay); 
+
+        current_state = next_state;
+        T = T * cooling_rate;
+        epsilon = std::max(epsilon_min, epsilon * epsilon_decay);
     }
+
     return best_sol;
 }
 
@@ -152,32 +180,13 @@ void ALNS_QLearning::exportMetrics(const std::string& filename) {
         std::cerr << "Error al abrir archivo para metricas: " << filename << std::endl;
         return;
     }
-    file << "iter,best_veh,best_dist,curr_veh,curr_dist,d_op,r_op,reward,temp,epsilon,state";
-    for (size_t i = 0; i < destroy_ops.size(); ++i) file << ",q_d0_" << i;
-    for (size_t i = 0; i < destroy_ops.size(); ++i) file << ",q_d1_" << i;
-    for (size_t i = 0; i < repair_ops.size(); ++i) file << ",q_r0_" << i;
-    for (size_t i = 0; i < repair_ops.size(); ++i) file << ",q_r1_" << i;
-    file << "\n";
-    
+    file << "iter,best_veh,best_dist,curr_veh,curr_dist,d_op,r_op,reward,temp,epsilon,outcome,opp_cost\n";
     for (const auto& data : history) {
-        file << data.iter << ","
-             << data.best_vehicles << ","
-             << data.best_distance << ","
-             << data.curr_vehicles << ","
-             << data.curr_distance << ","
-             << data.d_idx << ","
-             << data.r_idx << ","
-             << data.reward << ","
-             << data.temp << ","
-             << data.epsilon << ","
-             << data.state;
-        for (double q : data.q_d_state0) file << "," << q;
-        for (double q : data.q_d_state1) file << "," << q;
-        for (double q : data.q_r_state0) file << "," << q;
-        for (double q : data.q_r_state1) file << "," << q;
-        file << "\n";
+        file << data.iter << "," << data.best_vehicles << "," << data.best_distance << ","
+             << data.curr_vehicles << "," << data.curr_distance << "," << data.d_idx << ","
+             << data.r_idx << "," << data.reward << "," << data.temp << "," << data.epsilon << ","
+             << data.outcome << "," << data.opportunity_cost << "\n";
     }
-
     file.close();
     std::cout << "-> Metricas exportadas a " << filename << "\n";
 }

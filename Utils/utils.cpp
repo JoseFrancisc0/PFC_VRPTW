@@ -4,7 +4,6 @@ bool verifySolution(const Instance& inst, const Solution& sol) {
     int N = inst.clients.size();
     bool is_valid = true;
 
-    std::cout << "\n--- INICIANDO VERIFICACION DE SOLUCION ---\n";
     std::vector<int> visit_count(N, 0);
 
     int calculated_vehicles = 0;
@@ -80,124 +79,10 @@ bool verifySolution(const Instance& inst, const Solution& sol) {
         is_valid = false;
     }
 
-    if (is_valid)
-        std::cout << "[OK] La solucion es matematicamente 100% FACTIBLE.\n";
-    else
-        std::cout << "[X] La solucion es INFACTIBLE o tiene inconsistencias.\n";
-    
-    std::cout << "------------------------------------------\n";
-
     return is_valid;
 }
 
-void solveExact(Solution& current_sol, std::vector<bool>& unassigned, int unassigned_count, double& best_cost, Solution& best_sol) {
-    const Instance& inst = current_sol.inst;
-
-    current_sol.updateMetrics();
-    double current_cost = (current_sol.used_vehicles * 10000.0) + current_sol.total_distance;
-
-    if (current_cost >= best_cost) return; // Podando
-    
-    // CASO BASE: Éxito al asignar a todos los clientes
-    if (unassigned_count == 0) {
-        best_cost = current_cost;
-        best_sol = current_sol;
-        std::cout << ">>> Nuevo Optimo Global Encontrado! Costo: " << best_cost 
-                  << " (Vehiculos: " << current_sol.used_vehicles << ")\n";
-        return;
-    }
-
-    // SELECCIÓN DE CLIENTE
-    int client_id = -1;
-    for (size_t i = 1; i < inst.clients.size(); ++i) {
-        if (unassigned[i]) {
-            client_id = i;
-            break;
-        }
-    }
-    if (client_id == -1) return;
-
-    const Client& u_client = inst.clients[client_id]; // Explorando
-
-    // Opción A: Intentar insertar en TODAS las rutas activas, en TODAS las posiciones
-    for (size_t r = 0; r < current_sol.routes.size(); ++r) {
-        Route& route = current_sol.routes[r];
-        if (route.load + u_client.demand > inst.capacity) continue;
-
-        for (size_t i = 0; i < route.path.size() - 1; ++i) {
-            int prev = route.path[i];
-            int next = route.path[i + 1];
-
-            if (!inst.is_reachable[prev][client_id]) continue;
-            if (!inst.is_reachable[client_id][next]) continue;
-
-            double start_prev = std::max(route.arrival_times[i], inst.clients[prev].ready_time);
-            double arrival_u = start_prev + inst.clients[prev].service_time + inst.dist_mat[prev][client_id];
-            if (arrival_u > u_client.due_date) continue;
-
-            double start_u = std::max(arrival_u, u_client.ready_time);
-            double arrival_j_new = start_u + u_client.service_time + inst.dist_mat[client_id][next];
-            double delay = std::max(0.0, arrival_j_new - route.arrival_times[i + 1]);
-            
-            if (delay > route.wait_times[i+1] + route.time_slacks[i+1]) continue;
-
-            // Hacer
-            route.path.insert(route.path.begin() + i + 1, client_id);
-            route.recalculate(inst);
-            unassigned[client_id] = false;
-
-            // Llamada recursiva
-            solveExact(current_sol, unassigned, unassigned_count - 1, best_cost, best_sol);
-
-            // Deshacer
-            route.path.erase(route.path.begin() + i + 1);
-            route.recalculate(inst);
-            unassigned[client_id] = true;
-        }
-    }
-
-    // Opción B: Forzar la creación de un vehículo nuevo para este cliente
-    Route new_route;
-    new_route.path.insert(new_route.path.begin() + 1, client_id);
-    new_route.recalculate(inst);
-    
-    // Hacer
-    current_sol.routes.push_back(new_route);
-    unassigned[client_id] = false;
-
-    // Llamada Recursiva
-    solveExact(current_sol, unassigned, unassigned_count - 1, best_cost, best_sol);
-
-    // Deshacer
-    current_sol.routes.pop_back();
-    unassigned[client_id] = true;
-}
-
-void exportSolutionRoutes(const Solution& sol, const std::string& filename) {
-    std::ofstream file(filename);
-    if (!file.is_open()) {
-        std::cerr << "[!] Error al abrir archivo para exportar rutas: " << filename << "\n";
-        return;
-    }
-
-    int route_id = 0;
-    for (const Route& route : sol.routes) {
-        if (route.path.size() > 2) {
-            file << "Ruta_" << route_id;
-            for (int node : route.path) {
-                file << "," << node;
-            }
-            file << "\n";
-            route_id++;
-        }
-    }
-
-    file.close();
-    std::cout << "-> Estructura de rutas optimas exportada a " << filename << "\n";
-}
-
-Solution solve_with_classic(const Instance& inst, const Solution& sol, int max_iters, std::string metrics_path, std::string routes_path) {
-    std::cout << "[3] Iniciando ALNS por " << max_iters << " iteraciones...\n";
+Solution solve_with_classic(const Instance& inst, const Solution& sol, int max_iters, std::string metrics_path) {
     ALNS solver(inst, sol);
     
     bool save_metrics = false;
@@ -206,14 +91,10 @@ Solution solve_with_classic(const Instance& inst, const Solution& sol, int max_i
     Solution best_solution = solver.solve(max_iters, save_metrics);
 
     if (!metrics_path.empty()) solver.exportMetrics(metrics_path);  
-    if (!routes_path.empty()) exportSolutionRoutes(best_solution, routes_path);
-    
-    verifySolution(inst, best_solution);
     return best_solution;
 }
 
-Solution solve_with_qlearning(const Instance& inst, const Solution& sol, int max_iters, std::string metrics_path, std::string routes_path) {
-    std::cout << "[3] Iniciando ALNS con Q-Learning por " << max_iters << " iteraciones...\n";
+Solution solve_with_qlearning(const Instance& inst, const Solution& sol, int max_iters, std::string metrics_path) {
     ALNS_QLearning solver(inst, sol);
 
     bool save_metrics = false;
@@ -222,8 +103,5 @@ Solution solve_with_qlearning(const Instance& inst, const Solution& sol, int max
     Solution best_solution = solver.solve(max_iters, save_metrics);
 
     if (!metrics_path.empty()) solver.exportMetrics(metrics_path);  
-    if (!routes_path.empty()) exportSolutionRoutes(best_solution, routes_path);
-
-    verifySolution(inst, best_solution);
     return best_solution;
 }
