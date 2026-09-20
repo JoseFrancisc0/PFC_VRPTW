@@ -1,0 +1,15 @@
+# Artefactos y binarios de compilación C++ (evita que lea binarios o código autogenerado)
+build/
+bin/
+*.exe
+*.o
+*.obj
+
+# Datasets de instancias y benchmarks (pesadísimos en tokens si hace búsquedas)
+solomon-100/
+
+# Logs, salidas de corridas y resultados de metaheurísticas
+Experiments/
+*.csv
+*.log
+*.txt
