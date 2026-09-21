@@ -24,6 +24,17 @@ void ALNS_QLearning::initOps() {
 
     Q_table_D.assign(num_states, std::vector<double>(destroy_ops.size(), 0.0));
     Q_table_R.assign(num_states, std::vector<double>(repair_ops.size(), 0.0));
+    visits_D.assign(num_states, std::vector<int>(destroy_ops.size(), 0));
+    visits_R.assign(num_states, std::vector<int>(repair_ops.size(), 0));
+}
+
+int ALNS_QLearning::computeState(int phase, int stagnation_level) {
+    return phase * num_stagnation + stagnation_level;
+}
+
+double ALNS_QLearning::learningRate(int visits) const {
+    int capped = std::min(visits, alpha_cap);
+    return std::max(alpha_min, 1.0 / (1.0 + capped));
 }
 
 int ALNS_QLearning::selectOp(const std::vector<double>& q_values, double epsilon) {
@@ -54,13 +65,17 @@ Solution ALNS_QLearning::solve(int max_iters, bool save_metrics) {
     start_temp = -(0.10 * initial_d) / std::log(0.5);
     double T = start_temp;
 
-    // Mismo esquema de exploracion decreciente; piso mas bajo que antes (0.15)
-    // porque ahora la recompensa es estable y conviene explotar mas al final.
+    // Piso de exploracion de la ruleta clasica (destroy_weights/repair_weights
+    // nunca bajan de 0.01): reservamos un epsilon minimo comparable para que la
+    // explotacion greedy nunca colapse del todo, incluso en corridas largas.
     double epsilon = 1.0;
-    double epsilon_decay = 0.998;
     double epsilon_min = 0.05;
+    // La ventana de decaimiento se ata a max_iters (no a un valor fijo de
+    // iteracion) para que el punto de la corrida en que se llega al piso de
+    // exploracion sea proporcional al presupuesto de iteraciones, igual que el
+    // enfriamiento del SA ya escala con 'cooling_rate' sobre toda la corrida.
+    double epsilon_decay = std::pow(epsilon_min, 1.0 / (0.5 * max_iters));
 
-    int current_state = 0;
     int n_customers = inst.clients.size() - 1;
 
     // Mismo grado de destruccion que ALNS clasico (misma base).
@@ -70,6 +85,10 @@ Solution ALNS_QLearning::solve(int max_iters, bool save_metrics) {
 
     double curr_cost = cost(current_sol);
     double best_cost = cost(best_sol);
+    int best_vehicles = best_sol.used_vehicles;
+
+    int iters_since_improvement = 0;
+    int current_state = computeState(0, 0);
 
     for (int iter = 1; iter <= max_iters; ++iter) {
         Solution candidate = current_sol;
@@ -83,50 +102,63 @@ Solution ALNS_QLearning::solve(int max_iters, bool save_metrics) {
         destroy_ops[d_idx](candidate, q);
         repair_ops[r_idx](candidate);
 
-        // Mismas categorias de score que ALNS clasico (w1..w4), usadas aqui
-        // directamente como recompensa: acotada y estacionaria a lo largo de
-        // la corrida (a diferencia de la version anterior, que escalaba con
-        // 'iter' y rompia la convergencia de Q-learning).
-        double score = w4;
-        int next_state = 0; // rechazada (por defecto, incluye candidato infactible)
+        // Recompensa: mismas categorias base que ALNS clasico, mas un nivel
+        // extra (w0) cuando la mejora reduce vehiculos, para que el agente
+        // distinga explicitamente el evento de mayor prioridad (menos
+        // vehiculos) de una simple reduccion de distancia con la misma flota.
+        double reward = w4;
+        bool improved_best = false;
 
         // cost() no penaliza clientes sin asignar (eso solo lo hace
         // cost_phase1). Si el repair no logro reinsertar a todos, la
-        // solucion es infactible y no debe competir por costo (si no,
-        // parece "mas barata" al faltarle clientes y se acepta, perdiendo
-        // clientes en cascada). Se trata igual que cualquier rechazo:
-        // score=w4/estado 0, y el Q-update de abajo sigue corriendo normal.
+        // solucion es infactible y no debe competir por costo: se trata
+        // igual que cualquier rechazo (reward=w4).
         if (candidate.unassigned.empty()) {
             double cand_cost = cost(candidate);
 
             if (cand_cost < best_cost) {
+                bool fewer_vehicles = candidate.used_vehicles < best_vehicles;
                 best_sol = candidate;
                 current_sol = candidate;
                 curr_cost = cand_cost;
                 best_cost = cand_cost;
-                score = w1;
-                next_state = 2; // nuevo mejor global
+                best_vehicles = candidate.used_vehicles;
+                reward = fewer_vehicles ? w0 : w1;
+                improved_best = true;
             } else if (cand_cost < curr_cost) {
                 current_sol = candidate;
                 curr_cost = cand_cost;
-                score = w2;
-                next_state = 1; // aceptada (mejora local)
+                reward = w2;
             } else if (accept(cand_cost, curr_cost, T)) {
                 current_sol = candidate;
                 curr_cost = cand_cost;
-                score = w3;
-                next_state = 1; // aceptada (SA)
+                reward = w3;
             }
-            // else: rechazada, score = w4, next_state = 0
+            // else: rechazada, reward = w4
         }
 
-        double reward = score;
+        iters_since_improvement = improved_best ? 0 : (iters_since_improvement + 1);
+
+        // Fase de busqueda por fraccion de iteraciones transcurridas (0..1),
+        // en 3 tercios; estancamiento en 3 niveles por iteraciones sin mejorar
+        // el mejor global. Ambos son independientes de 'reward', a diferencia
+        // del estado de la version anterior (que era una recodificacion 1:1
+        // del propio reward y anulaba el termino de bootstrap gamma*max_Q).
+        double frac = static_cast<double>(iter) / max_iters;
+        int phase = frac < (1.0 / 3.0) ? 0 : (frac < (2.0 / 3.0) ? 1 : 2);
+        int stagnation_level = iters_since_improvement < 50 ? 0 : (iters_since_improvement < 300 ? 1 : 2);
+        int next_state = computeState(phase, stagnation_level);
 
         double max_next_q_D = *std::max_element(Q_table_D[next_state].begin(), Q_table_D[next_state].end());
         double max_next_q_R = *std::max_element(Q_table_R[next_state].begin(), Q_table_R[next_state].end());
 
-        Q_table_D[current_state][d_idx] += alpha * (reward + gamma * max_next_q_D - Q_table_D[current_state][d_idx]);
-        Q_table_R[current_state][r_idx] += alpha * (reward + gamma * max_next_q_R - Q_table_R[current_state][r_idx]);
+        int& vd = visits_D[current_state][d_idx];
+        int& vr = visits_R[current_state][r_idx];
+        double alpha_d = learningRate(vd++);
+        double alpha_r = learningRate(vr++);
+
+        Q_table_D[current_state][d_idx] += alpha_d * (reward + gamma * max_next_q_D - Q_table_D[current_state][d_idx]);
+        Q_table_R[current_state][r_idx] += alpha_r * (reward + gamma * max_next_q_R - Q_table_R[current_state][r_idx]);
 
         current_state = next_state;
 

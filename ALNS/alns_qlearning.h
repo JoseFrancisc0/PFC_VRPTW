@@ -29,27 +29,45 @@ class ALNS_QLearning {
         double start_temp;
         double cooling_rate = 0.9995;
 
-        // Categorias de score identicas a ALNS clasico (misma base: la unica
-        // diferencia entre algoritmos es como se usan estos scores para elegir
-        // el proximo operador: promedio por segmento vs. recompensa de Q-learning).
-        double w1 = 33.0; // nuevo mejor global
-        double w2 = 13.0; // nuevo mejor actual
-        double w3 = 9.0;  // aceptada por SA
-        double w4 = 0.0;  // rechazada
+        // Categorias de score base (misma escala que ALNS clasico), mas un
+        // nivel adicional exclusivo para el evento de mayor prioridad segun
+        // la jerarquia del problema: reducir vehiculos antes que distancia.
+        double w0 = 45.0; // nuevo mejor global CON MENOS VEHICULOS (prioridad maxima)
+        double w1 = 33.0;  // nuevo mejor global (misma cantidad de vehiculos, menos distancia)
+        double w2 = 13.0;  // nuevo mejor actual
+        double w3 = 9.0;   // aceptada por SA
+        double w4 = 0.0;   // rechazada
 
         // Hiperparametros de Q-learning (criterio de seleccion de operadores)
-        double alpha = 0.1;
         double gamma = 0.8;
-        // Estados: 0 = movimiento rechazado, 1 = aceptado (mejora actual o SA),
-        // 2 = mejoro la mejor solucion global.
-        int num_states = 3;
+
+        // Estado = (fase de busqueda) x (nivel de estancamiento), independiente
+        // de la recompensa inmediata. Esto evita que el estado sea una simple
+        // recodificacion del score de ese mismo paso (lo que en la version
+        // anterior volvia inutil el termino de bootstrap gamma*max_Q): aqui la
+        // fase (temperatura/iteracion) y el estancamiento (iteraciones sin
+        // mejorar el mejor global) aportan informacion real sobre el progreso
+        // de la busqueda, distinta de lo que ya dice la recompensa del paso.
+        static const int num_phases = 3;      // 0=temprano, 1=medio, 2=tardio
+        static const int num_stagnation = 3;  // 0=recien mejoro, 1=medio, 2=estancado
+        int num_states = num_phases * num_stagnation;
 
         std::vector<std::vector<double>> Q_table_D;
         std::vector<std::vector<double>> Q_table_R;
 
+        // Contadores de visitas por (estado, accion) para una tasa de
+        // aprendizaje adaptativa (Robbins-Monro acotada): mas estable que un
+        // alpha fijo, sobre todo en estados poco visitados.
+        std::vector<std::vector<int>> visits_D;
+        std::vector<std::vector<int>> visits_R;
+        static constexpr int alpha_cap = 40; // visita a partir de la cual alpha deja de bajar
+        static constexpr double alpha_min = 0.05;
+
         void initOps();
         int selectOp(const std::vector<double>& q_values, double epsilon);
         bool accept(double cand_cost, double curr_cost, double current_temp);
+        static int computeState(int phase, int stagnation_level);
+        double learningRate(int visits) const;
 };
 
 #endif
