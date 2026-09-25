@@ -12,6 +12,11 @@ GRAFICOS_DIR = os.path.join(ANALISIS_DIR, "Graficos")
 os.makedirs(TABLAS_DIR, exist_ok=True)
 os.makedirs(GRAFICOS_DIR, exist_ok=True)
 
+# Ponderacion del GAP Unificado: debe ser identica a VEHICLE_COST en
+# "VRPTW Environment/solution.cpp" (funcion cost()), que es lo que ambos
+# solvers realmente optimizan. Si ese valor cambia en el C++, actualizar aca.
+VEHICLE_WEIGHT = 10000
+
 class Logger:
     def __init__(self, filename):
         self.terminal = sys.stdout
@@ -26,6 +31,14 @@ class Logger:
 sys.stdout = Logger(os.path.join(ANALISIS_DIR, "conclusiones_comparativas.txt"))
 
 print("=== INICIO DEL ANALISIS DE RESULTADOS ===")
+print(f"""
+Formula del GAP Unificado (misma ponderacion que cost() en el solver C++):
+  Cost(NV, TD)       = {VEHICLE_WEIGHT} * NV + TD
+  GAP_Unificado(%)   = (Cost_Nuestro - Cost_BKS) / Cost_BKS * 100
+Es decir: un vehiculo adicional equivale a {VEHICLE_WEIGHT} unidades de distancia
+en esta metrica. Se reporta junto a GAP_Vehiculos(%) y GAP_Distancia(%), que
+son gaps independientes por objetivo (no ponderados entre si).
+""")
 
 df_res = pd.read_csv(os.path.join(BASE_DIR, "resultados_ejecuciones_iterativas.csv"))
 df_sintef = pd.read_csv(os.path.join(BASE_DIR, "sintef.csv"), sep=";", encoding="latin1")
@@ -46,8 +59,8 @@ def get_class(inst):
 
 df["Clase"] = df["Instancia"].apply(get_class)
 
-df["Cost_Ours"] = df["Avg_Vehiculos"] * 10000 + df["Avg_Distancia"]
-df["Cost_BKS"] = df["BKS_Vehiculos"] * 10000 + df["BKS_Distancia"]
+df["Cost_Ours"] = df["Avg_Vehiculos"] * VEHICLE_WEIGHT + df["Avg_Distancia"]
+df["Cost_BKS"] = df["BKS_Vehiculos"] * VEHICLE_WEIGHT + df["BKS_Distancia"]
 
 df["GAP_Vehiculos(%)"] = ((df["Avg_Vehiculos"] - df["BKS_Vehiculos"]) / df["BKS_Vehiculos"]) * 100
 df["GAP_Distancia(%)"] = ((df["Avg_Distancia"] - df["BKS_Distancia"]) / df["BKS_Distancia"]) * 100
@@ -99,14 +112,30 @@ for _, row in df_paper_final.iterrows():
     
     gap_str = f"{gap_bks_nv:+.2f}% / {gap_bks_td:+.2f}%"
     imp_str = f"{imp_alns_nv:+.2f}% / {imp_alns_td:+.2f}%"
-    
+
+    # Gap Unificado: Cost(NV, TD) = VEHICLE_WEIGHT*NV + TD (ver formula impresa
+    # al inicio). A diferencia de las dos columnas de arriba (gaps
+    # independientes por objetivo), esta es la unica que pondera NV contra TD
+    # en un solo numero -- la misma metrica que "cost()" usa para aceptar y
+    # comparar soluciones dentro del solver.
+    cost_bks_row = row["BKS_Vehiculos"] * VEHICLE_WEIGHT + row["BKS_Distancia"]
+    cost_classic_row = classic_nv * VEHICLE_WEIGHT + classic_td
+    cost_ql_row = ql_nv * VEHICLE_WEIGHT + ql_td
+
+    gap_uni_classic = ((cost_classic_row - cost_bks_row) / cost_bks_row) * 100 if cost_bks_row > 0 else 0
+    gap_uni_ql = ((cost_ql_row - cost_bks_row) / cost_bks_row) * 100 if cost_bks_row > 0 else 0
+    imp_uni = ((cost_classic_row - cost_ql_row) / cost_classic_row) * 100 if cost_classic_row > 0 else 0
+
     paper_records.append({
         "Benchmark / Clase": row["Clase"],
         "BKS (NV/TD)": bks_str,
         "Classical ALNS (NV/TD)": classic_str,
         "Proposed RL-ALNS (NV/TD)": ql_str,
         "Gap vs. BKS (NV/TD %)": gap_str,
-        "Imp. vs. ALNS (NV/TD %)": imp_str
+        "Imp. vs. ALNS (NV/TD %)": imp_str,
+        "Gap Unificado ALNS vs. BKS (%)": f"{gap_uni_classic:+.2f}%",
+        "Gap Unificado Q-ALNS vs. BKS (%)": f"{gap_uni_ql:+.2f}%",
+        "Imp. Unificado vs. ALNS (%)": f"{imp_uni:+.2f}%"
     })
 
 avg_bks_nv = df_paper_final["BKS_Vehiculos"].mean()
@@ -124,13 +153,24 @@ imp_alns_td_global = ((avg_classic_td - avg_ql_td) / avg_classic_td) * 100 if av
 gap_str_global = f"{gap_bks_nv_global:+.2f}% / {gap_bks_td_global:+.2f}%"
 imp_str_global = f"{imp_alns_nv_global:+.2f}% / {imp_alns_td_global:+.2f}%"
 
+cost_bks_global = avg_bks_nv * VEHICLE_WEIGHT + avg_bks_td
+cost_classic_global = avg_classic_nv * VEHICLE_WEIGHT + avg_classic_td
+cost_ql_global = avg_ql_nv * VEHICLE_WEIGHT + avg_ql_td
+
+gap_uni_classic_global = ((cost_classic_global - cost_bks_global) / cost_bks_global) * 100 if cost_bks_global > 0 else 0
+gap_uni_ql_global = ((cost_ql_global - cost_bks_global) / cost_bks_global) * 100 if cost_bks_global > 0 else 0
+imp_uni_global = ((cost_classic_global - cost_ql_global) / cost_classic_global) * 100 if cost_classic_global > 0 else 0
+
 paper_records.append({
     "Benchmark / Clase": "Promedio Global",
     "BKS (NV/TD)": fmt_nv_td(avg_bks_nv, avg_bks_td),
     "Classical ALNS (NV/TD)": fmt_nv_td(avg_classic_nv, avg_classic_td),
     "Proposed RL-ALNS (NV/TD)": fmt_nv_td(avg_ql_nv, avg_ql_td),
     "Gap vs. BKS (NV/TD %)": gap_str_global,
-    "Imp. vs. ALNS (NV/TD %)": imp_str_global
+    "Imp. vs. ALNS (NV/TD %)": imp_str_global,
+    "Gap Unificado ALNS vs. BKS (%)": f"{gap_uni_classic_global:+.2f}%",
+    "Gap Unificado Q-ALNS vs. BKS (%)": f"{gap_uni_ql_global:+.2f}%",
+    "Imp. Unificado vs. ALNS (%)": f"{imp_uni_global:+.2f}%"
 })
 
 df_paper_out = pd.DataFrame(paper_records)
@@ -139,19 +179,18 @@ print(f"-> Generada tabla: tabla_paper_format.csv (Formato RL-ALNS).")
 
 print("\n--- TABLA PRINCIPAL DE RESULTADOS (FORMATO PAPER) ---")
 headers = df_paper_out.columns.tolist()
-header_format = "{:<20} | {:<15} | {:<22} | {:<24} | {:<25} | {:<25}"
+# Ancho por columna calculado a partir del contenido real (encabezado o mayor
+# valor), en vez de un formato fijo: con 9 columnas un ancho fijo se desalinea
+# apenas cambia un valor.
+col_widths = {h: max(len(h), df_paper_out[h].astype(str).map(len).max()) for h in headers}
+header_format = " | ".join(f"{{:<{col_widths[h]}}}" for h in headers)
+sep_len = sum(col_widths.values()) + 3 * (len(headers) - 1)
+
 print(header_format.format(*headers))
-print("-" * 145)
+print("-" * sep_len)
 for _, row in df_paper_out.iterrows():
-    print(header_format.format(
-        str(row["Benchmark / Clase"]), 
-        str(row["BKS (NV/TD)"]), 
-        str(row["Classical ALNS (NV/TD)"]), 
-        str(row["Proposed RL-ALNS (NV/TD)"]), 
-        str(row["Gap vs. BKS (NV/TD %)"]), 
-        str(row["Imp. vs. ALNS (NV/TD %)"])
-    ))
-print("-" * 145)
+    print(header_format.format(*[str(row[h]) for h in headers]))
+print("-" * sep_len)
 
 # --- GRAFICOS ---
 sns.set_theme(style="whitegrid")
@@ -172,7 +211,7 @@ for _, row in df.iterrows():
         if col_veh in row and pd.notna(row[col_veh]) and row[col_veh] != "":
             veh = float(row[col_veh])
             dist = float(row[col_dist])
-            cost_ours = veh * 10000 + dist
+            cost_ours = veh * VEHICLE_WEIGHT + dist
             gap_veh = ((veh - bks_veh) / bks_veh) * 100 if bks_veh > 0 else 0
             gap_dist = ((dist - bks_dist) / bks_dist) * 100 if bks_dist > 0 else 0
             gap_uni = ((cost_ours - cost_bks) / cost_bks) * 100 if cost_bks > 0 else 0

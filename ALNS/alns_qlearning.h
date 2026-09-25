@@ -9,9 +9,10 @@
 #include <numeric>
 #include <random> 
 #include "../Operators/operators.h"
+#include "../Utils/tuning.h"
 
 using DestroyOp = std::function<void(Solution&, int)>;
-using RepairOp  = std::function<void(Solution&)>;
+using RepairOp  = std::function<void(Solution&, bool)>;
 
 class ALNS_QLearning {
     public:
@@ -22,52 +23,75 @@ class ALNS_QLearning {
         const Instance& inst;
         Solution current_sol;
         Solution best_sol;
+
         std::vector<DestroyOp> destroy_ops;
         std::vector<RepairOp> repair_ops;
 
-        // Mismo esquema de enfriamiento SA que ALNS (base compartida).
+        // Marca los destroy cuyo proposito es eliminar una ruta (ver alns.h:
+        // el tratamiento es identico en ambos solvers, es base compartida).
+        std::vector<bool> destroy_is_route_elimination;
+
+        // Mismo esquema de enfriamiento SA, mismo cost() y mismo grado de
+        // destruccion que ALNS clasico: la unica diferencia entre ambos
+        // algoritmos sigue siendo el criterio de seleccion de operadores.
         double start_temp;
         double cooling_rate = 0.9995;
 
-        // Categorias de score base (misma escala que ALNS clasico), mas un
-        // nivel adicional exclusivo para el evento de mayor prioridad segun
-        // la jerarquia del problema: reducir vehiculos antes que distancia.
-        double w0 = 45.0; // nuevo mejor global CON MENOS VEHICULOS (prioridad maxima)
-        double w1 = 33.0;  // nuevo mejor global (misma cantidad de vehiculos, menos distancia)
-        double w2 = 13.0;  // nuevo mejor actual
-        double w3 = 9.0;   // aceptada por SA
-        double w4 = 0.0;   // rechazada
+        // --- Espacio de acciones -----------------------------------------
+        // La accion es el PAR (destroy, repair), no dos elecciones
+        // independientes. Con dos tablas Q separadas (una por familia de
+        // operadores) el metodo era estructuralmente identico a las dos
+        // ruletas independientes del ALNS clasico y no podia representar
+        // sinergia entre operadores: p.ej. que routeRemoval rinda bien con
+        // regret3Insertion y mal con greedyInsertion. Una unica tabla sobre
+        // los |D|x|R| pares si puede aprender esa interaccion.
+        int num_actions = 0;
 
-        // Hiperparametros de Q-learning (criterio de seleccion de operadores)
-        double gamma = 0.8;
+        // --- Espacio de estados ------------------------------------------
+        // S = {0, 1}: 1 si la iteracion previa logro alguna mejora (global o
+        // local), 0 si no. Estado minimo y bien muestreado: con 2 estados y
+        // 24 acciones son 48 celdas, ~500 visitas cada una en una corrida de
+        // 25k iteraciones. Particionar mas (p.ej. agregando fase temporal)
+        // fragmenta la muestra sin aportar informacion accionable.
+        static constexpr int num_states = 2;
 
-        // Estado = (fase de busqueda) x (nivel de estancamiento), independiente
-        // de la recompensa inmediata. Esto evita que el estado sea una simple
-        // recodificacion del score de ese mismo paso (lo que en la version
-        // anterior volvia inutil el termino de bootstrap gamma*max_Q): aqui la
-        // fase (temperatura/iteracion) y el estancamiento (iteraciones sin
-        // mejorar el mejor global) aportan informacion real sobre el progreso
-        // de la busqueda, distinta de lo que ya dice la recompensa del paso.
-        static const int num_phases = 3;      // 0=temprano, 1=medio, 2=tardio
-        static const int num_stagnation = 3;  // 0=recien mejoro, 1=medio, 2=estancado
-        int num_states = num_phases * num_stagnation;
+        std::vector<std::vector<double>> Q;
 
-        std::vector<std::vector<double>> Q_table_D;
-        std::vector<std::vector<double>> Q_table_R;
+        // --- Hiperparametros de Q-learning --------------------------------
+        // Valores sintonizados por RSM / Box-Behnken sobre el problema origen.
+        // OJO con alpha: en VRPTW con 25k iteraciones la tasa de exito por
+        // iteracion es baja (pocas mejoras entre muchos fracasos), y alpha=0.5
+        // da un horizonte efectivo de ~2 muestras, o sea una estimacion muy
+        // reactiva. Es el primer hiperparametro a ablacionar (0.5 -> 0.1 -> 0.05)
+        // si la politica resulta demasiado ruidosa.
+        double alpha = 0.5;          // tasa de aprendizaje (constante)
+        double gamma = 0.7;          // factor de descuento
+        double epsilon_0 = 1.0;      // exploracion inicial
+        double beta = 0.99;          // decaimiento de epsilon por paso
+        double epsilon_min = 0.01;   // piso de exploracion (salvaguarda)
+        // Con beta=0.99 epsilon cae de 1.0 al piso en ~460 pasos tras el warm-up.
+        // learning_loop es absoluto, no proporcional: con presupuestos chicos
+        // (<= 1000 iteraciones) conviene reducirlo.
+        int learning_loop = 200;     // iteraciones iniciales 100% aleatorias
+        double eta = 0.8;            // peso de la mejora global en la recompensa
 
-        // Contadores de visitas por (estado, accion) para una tasa de
-        // aprendizaje adaptativa (Robbins-Monro acotada): mas estable que un
-        // alpha fijo, sobre todo en estados poco visitados.
-        std::vector<std::vector<int>> visits_D;
-        std::vector<std::vector<int>> visits_R;
-        static constexpr int alpha_cap = 40; // visita a partir de la cual alpha deja de bajar
-        static constexpr double alpha_min = 0.05;
+        // --- Escala de la recompensa (adaptacion a VRPTW) ------------------
+        // Con cost = 10000*veh + dist la mejora relativa abarca ~4 ordenes de
+        // magnitud: ~1e-5 para un ajuste de distancia y ~1e-1 para eliminar un
+        // vehiculo. Usando la mejora cruda, los (raros) eventos de vehiculo
+        // dominan la media por operador y el estimador se vuelve de varianza
+        // alta, que es justo lo que hace que un argmax elija ruido. La
+        // compresion log1p(gain*delta) preserva el orden -- un vehiculo menos
+        // sigue valiendo ~7x una buena mejora de distancia -- pero acota el
+        // rango para que la media sea estable.
+        static constexpr double reward_gain = 1.0e4;
 
         void initOps();
-        int selectOp(const std::vector<double>& q_values, double epsilon);
+        int selectAction(int state, double epsilon);
         bool accept(double cand_cost, double curr_cost, double current_temp);
-        static int computeState(int phase, int stagnation_level);
-        double learningRate(int visits) const;
+        static double shapeImprovement(double relative_gain);
+        int destroyOf(int action) const;
+        int repairOf(int action) const;
 };
 
 #endif

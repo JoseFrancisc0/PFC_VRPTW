@@ -21,12 +21,20 @@ void ALNS::initOps() {
         removeSmallestRoute(sol);
     });
 
-    repair_ops.push_back([](Solution& sol) { greedyInsertion(sol); });
-    repair_ops.push_back([](Solution& sol) { regret2Insertion(sol); });
-    repair_ops.push_back([](Solution& sol) { regret3Insertion(sol); });
-    repair_ops.push_back([](Solution& sol) {
-        pGreedyInsertion(sol);
+    repair_ops.push_back([](Solution& sol, bool anr) { greedyInsertion(sol, anr); });
+    repair_ops.push_back([](Solution& sol, bool anr) { regret2Insertion(sol, anr); });
+    repair_ops.push_back([](Solution& sol, bool anr) { regret3Insertion(sol, anr); });
+    repair_ops.push_back([](Solution& sol, bool anr) {
+        pGreedyInsertion(sol, anr);
     });
+
+    // Mismo orden que destroy_ops. Solo removeSmallestRoute es un operador de
+    // eliminacion de ruta propiamente dicho: vacia UNA sola ruta (la mas
+    // chica), que es el unico caso en que exigir "cero rutas nuevas" es
+    // alcanzable. routeRemoval vacia rutas enteras hasta juntar q clientes
+    // (1-5 rutas en instancias R/RC); exigirle cero rutas nuevas lo volveria
+    // infactible casi siempre y lo anularia como operador.
+    destroy_is_route_elimination = {false, false, false, false, false, true};
 
     int num_destroy = destroy_ops.size();
     destroy_weights.assign(num_destroy, 1.0);
@@ -100,7 +108,7 @@ void ALNS::updateWeightsSegment() {
 
 Solution ALNS::solve(int max_iters) {
     double initial_d = current_sol.total_distance;
-    start_temp = -(0.10 * initial_d) / std::log(0.5);
+    start_temp = -(tuning::TEMP_SCALE * initial_d) / std::log(0.5);
     double T = start_temp;
     int n_customers = inst.clients.size() - 1;
 
@@ -110,6 +118,8 @@ Solution ALNS::solve(int max_iters) {
 
     double curr_cost = cost(current_sol);
     double best_cost = cost(best_sol);
+
+    int iters_since_best = 0;
 
     for (int iter = 1; iter <= max_iters; ++iter) {
         Solution candidate = current_sol;
@@ -121,10 +131,14 @@ Solution ALNS::solve(int max_iters) {
 
         // r(d(x))
         destroy_ops[d_idx](candidate, q);
-        repair_ops[r_idx](candidate);
+        if (destroy_is_route_elimination[d_idx])
+            repairTryEliminateRoute(candidate, repair_ops[r_idx]);
+        else
+            repair_ops[r_idx](candidate, true);
 
         // Evaluacion y scores
         double score = w4; // por defecto, incluye candidato infactible
+        bool improved_best = false;
 
         // cost() no penaliza clientes sin asignar (solo lo hace cost_phase1,
         // usado en otra fase). Si el repair no logro reinsertar a todos
@@ -144,6 +158,7 @@ Solution ALNS::solve(int max_iters) {
                 curr_cost = cand_cost;
                 best_cost = cand_cost;
                 score = w1;
+                improved_best = true;
             }
             else if (cand_cost < curr_cost) {
                 // Nuevo mejor actual
@@ -158,6 +173,20 @@ Solution ALNS::solve(int max_iters) {
                 score = w3;
             }
             // else: rechazada, score = w4
+        }
+
+
+        // Reinicio por estancamiento (capa externa del bucle de dos capas):
+        // tras STAGNATION_LIMIT iteraciones sin mejorar el mejor global, la
+        // busqueda vuelve al mejor conocido y recalienta la temperatura. Sin
+        // esto, una vez que T se enfria no hay ningun mecanismo de escape y
+        // las colas largas de estancamiento se desperdician.
+        iters_since_best = improved_best ? 0 : (iters_since_best + 1);
+        if (tuning::STAGNATION_LIMIT > 0 && iters_since_best >= tuning::STAGNATION_LIMIT) {
+            current_sol = best_sol;
+            curr_cost = best_cost;
+            T = start_temp * tuning::REHEAT_FACTOR;
+            iters_since_best = 0;
         }
 
         // Acumulacion de scores + cierre de segmento

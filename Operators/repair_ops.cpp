@@ -31,7 +31,7 @@ bool evalInsertion(const Solution& sol, int client_id, const Route& route, size_
 }
 
 // Insertamos lo que minimiza el aumento inmediato de costo
-void greedyInsertion(Solution& sol){
+void greedyInsertion(Solution& sol, bool allow_new_routes){
     while (!sol.unassigned.empty()) {
         double best_cost = std::numeric_limits<double>::max();
         int best_client_idx_in_unassigned = -1;
@@ -44,6 +44,10 @@ void greedyInsertion(Solution& sol){
 
             for (size_t r = 0; r < sol.routes.size(); ++r) {
                 Route& route = sol.routes[r];
+                // Una ruta vacia es, en los hechos, una ruta nueva: si el
+                // repair tiene prohibido abrirlas tampoco puede rellenar los
+                // cascarones que hayan quedado de iteraciones anteriores.
+                if (!allow_new_routes && route.path.size() <= 2) continue;
                 if (route.load + u_client.demand > sol.inst.capacity) continue;
 
                 for (size_t i = 0; i < route.path.size() - 1; ++i) {
@@ -70,6 +74,12 @@ void greedyInsertion(Solution& sol){
             sol.unassigned.pop_back();
         }
         else {
+            // Sin permiso para abrir rutas nuevas, lo que no entra queda sin
+            // asignar y el solver descartara el candidato. Es el desenlace
+            // esperado de un intento fallido de eliminar una ruta, no una
+            // anomalia, asi que no se reporta por stderr.
+            if (!allow_new_routes) break;
+
             if (!sol.routes.empty() && sol.routes.back().path.size() <= 2) {
                 std::cerr << "[!] " << sol.unassigned.size()
                           << " clientes no pudieron ser insertados de forma factible. \n";
@@ -84,7 +94,7 @@ void greedyInsertion(Solution& sol){
 }
 
 // Greedy anticipando la segunda mejor posicion del cliente
-void regret2Insertion(Solution& sol){
+void regret2Insertion(Solution& sol, bool allow_new_routes){
     while (!sol.unassigned.empty()) {
         double max_regret = -1.0;
         int best_client_idx_in_unassigned = -1;
@@ -102,6 +112,10 @@ void regret2Insertion(Solution& sol){
 
             for (size_t r = 0; r < sol.routes.size(); ++r) {
                 Route& route = sol.routes[r];
+                // Una ruta vacia es, en los hechos, una ruta nueva: si el
+                // repair tiene prohibido abrirlas tampoco puede rellenar los
+                // cascarones que hayan quedado de iteraciones anteriores.
+                if (!allow_new_routes && route.path.size() <= 2) continue;
                 if (route.load + u_client.demand > sol.inst.capacity) continue;
 
                 for (size_t i = 0; i < route.path.size() - 1; ++i) {
@@ -142,6 +156,12 @@ void regret2Insertion(Solution& sol){
             sol.unassigned.pop_back();
         }
         else {
+            // Sin permiso para abrir rutas nuevas, lo que no entra queda sin
+            // asignar y el solver descartara el candidato. Es el desenlace
+            // esperado de un intento fallido de eliminar una ruta, no una
+            // anomalia, asi que no se reporta por stderr.
+            if (!allow_new_routes) break;
+
             if (!sol.routes.empty() && sol.routes.back().path.size() <= 2) {
                 std::cerr << "[!] " << sol.unassigned.size()
                           << " clientes no pudieron ser insertados de forma factible. \n";
@@ -156,7 +176,7 @@ void regret2Insertion(Solution& sol){
 }
 
 // Regret-2 pero para las m=3 mejores rutas
-void regret3Insertion(Solution& sol){
+void regret3Insertion(Solution& sol, bool allow_new_routes){
     while (!sol.unassigned.empty()) {
         double max_regret = -1.0;
         int best_client_idx_in_unassigned = -1;
@@ -171,6 +191,10 @@ void regret3Insertion(Solution& sol){
 
             for (size_t r = 0; r < sol.routes.size(); ++r) {
                 Route& route = sol.routes[r];
+                // Una ruta vacia es, en los hechos, una ruta nueva: si el
+                // repair tiene prohibido abrirlas tampoco puede rellenar los
+                // cascarones que hayan quedado de iteraciones anteriores.
+                if (!allow_new_routes && route.path.size() <= 2) continue;
                 if (route.load + u_client.demand > sol.inst.capacity) continue;
 
                 double best_cost_in_r = std::numeric_limits<double>::max();
@@ -225,6 +249,12 @@ void regret3Insertion(Solution& sol){
             sol.unassigned.pop_back();
         }
         else {
+            // Sin permiso para abrir rutas nuevas, lo que no entra queda sin
+            // asignar y el solver descartara el candidato. Es el desenlace
+            // esperado de un intento fallido de eliminar una ruta, no una
+            // anomalia, asi que no se reporta por stderr.
+            if (!allow_new_routes) break;
+
             if (!sol.routes.empty() && sol.routes.back().path.size() <= 2) {
                 std::cerr << "[!] " << sol.unassigned.size()
                           << " clientes no pudieron ser insertados de forma factible. \n";
@@ -239,7 +269,7 @@ void regret3Insertion(Solution& sol){
 }
 
 // Greedy con ruido
-void pGreedyInsertion(Solution& sol, double eta){
+void pGreedyInsertion(Solution& sol, bool allow_new_routes, double eta){
     std::uniform_real_distribution<double> noise_distr(1.0 - eta, 1.0 + eta);
 
     while (!sol.unassigned.empty()) {
@@ -254,6 +284,10 @@ void pGreedyInsertion(Solution& sol, double eta){
 
             for (size_t r = 0; r < sol.routes.size(); ++r) {
                 Route& route = sol.routes[r];
+                // Una ruta vacia es, en los hechos, una ruta nueva: si el
+                // repair tiene prohibido abrirlas tampoco puede rellenar los
+                // cascarones que hayan quedado de iteraciones anteriores.
+                if (!allow_new_routes && route.path.size() <= 2) continue;
                 if (route.load + u_client.demand > sol.inst.capacity) continue;
 
                 for (size_t i = 0; i < route.path.size() - 1; ++i) {
@@ -281,6 +315,12 @@ void pGreedyInsertion(Solution& sol, double eta){
             sol.unassigned.pop_back();
         }
         else {
+            // Sin permiso para abrir rutas nuevas, lo que no entra queda sin
+            // asignar y el solver descartara el candidato. Es el desenlace
+            // esperado de un intento fallido de eliminar una ruta, no una
+            // anomalia, asi que no se reporta por stderr.
+            if (!allow_new_routes) break;
+
             if (!sol.routes.empty() && sol.routes.back().path.size() <= 2) {
                 std::cerr << "[!] " << sol.unassigned.size()
                           << " clientes no pudieron ser insertados de forma factible. \n";

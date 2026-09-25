@@ -16,6 +16,12 @@ int main(int argc, char** argv) {
             std::string algorithm = argv[2]; // "CLASSIC" / "QLEARNING"
             int max_iters = std::stoi(argv[3]);
 
+            // Semilla opcional: permite correr CLASSIC y QLEARNING sobre el
+            // mismo stream aleatorio (comparacion pareada). Sin ella cada
+            // proceso se siembra con el reloj y una diferencia real entre
+            // ambos algoritmos queda enterrada en la varianza entre corridas.
+            if (argc >= 5) rng.seed(static_cast<unsigned>(std::stoul(argv[4])));
+
             Instance inst(instance_file);
             Solution initial_sol(inst);
 
@@ -36,7 +42,7 @@ int main(int argc, char** argv) {
         }
     }
     else {
-        std::cerr << "Uso incorrecto. Argumentos esperados: <instancia> <CLASSIC|QLEARNING> <iteraciones>\n";
+        std::cerr << "Uso incorrecto. Argumentos esperados: <instancia> <CLASSIC|QLEARNING> <iteraciones> [semilla]\n";
         return 1;
     }
 
