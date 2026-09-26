@@ -173,9 +173,9 @@ void solveExact(Solution& current_sol, std::vector<bool>& unassigned, int unassi
     unassigned[client_id] = true;
 }
 
-Solution solve_with_classic(const Instance& inst, const Solution& sol, int max_iters) {
+Solution solve_with_classic(const Instance& inst, const Solution& sol, int max_iters, const SolverParams& params) {
     std::cout << "[3] Iniciando ALNS por " << max_iters << " iteraciones...\n";
-    ALNS solver(inst, sol);
+    ALNS solver(inst, sol, params);
     
     Solution best_solution = solver.solve(max_iters);
     
@@ -183,9 +183,9 @@ Solution solve_with_classic(const Instance& inst, const Solution& sol, int max_i
     return best_solution;
 }
 
-Solution solve_with_qlearning(const Instance& inst, const Solution& sol, int max_iters) {
+Solution solve_with_qlearning(const Instance& inst, const Solution& sol, int max_iters, const SolverParams& params) {
     std::cout << "[3] Iniciando ALNS con Q-Learning por " << max_iters << " iteraciones...\n";
-    ALNS_QLearning solver(inst, sol);
+    ALNS_QLearning solver(inst, sol, params);
 
     Solution best_solution = solver.solve(max_iters);
 

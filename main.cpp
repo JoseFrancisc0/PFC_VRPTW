@@ -22,14 +22,18 @@ int main(int argc, char** argv) {
             // ambos algoritmos queda enterrada en la varianza entre corridas.
             if (argc >= 5) rng.seed(static_cast<unsigned>(std::stoul(argv[4])));
 
+            // Parametros opcionales 'clave=valor' (ver Utils/params.h).
+            SolverParams params;
+            for (int i = 5; i < argc; ++i) params.set(argv[i]);
+
             Instance inst(instance_file);
             Solution initial_sol(inst);
 
             Solution best_solution(inst);
             if (algorithm == "CLASSIC")
-                best_solution = solve_with_classic(inst, initial_sol, max_iters);
+                best_solution = solve_with_classic(inst, initial_sol, max_iters, params);
             else if (algorithm == "QLEARNING")
-                best_solution = solve_with_qlearning(inst, initial_sol, max_iters);
+                best_solution = solve_with_qlearning(inst, initial_sol, max_iters, params);
             else {
                 std::cerr << "Algoritmo desconocido: " << algorithm << "\n";
                 return 1;
@@ -42,7 +46,7 @@ int main(int argc, char** argv) {
         }
     }
     else {
-        std::cerr << "Uso incorrecto. Argumentos esperados: <instancia> <CLASSIC|QLEARNING> <iteraciones> [semilla]\n";
+        std::cerr << "Uso incorrecto. Argumentos esperados: <instancia> <CLASSIC|QLEARNING> <iteraciones> [semilla] [clave=valor ...]\n";
         return 1;
     }
 

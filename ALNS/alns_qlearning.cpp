@@ -4,35 +4,34 @@
 
 extern std::mt19937 rng; 
 
-ALNS_QLearning::ALNS_QLearning(const Instance& _inst, const Solution& _initial_sol) 
-    : inst(_inst), current_sol(_initial_sol), best_sol(_initial_sol) {
+ALNS_QLearning::ALNS_QLearning(const Instance& _inst, const Solution& _initial_sol, const SolverParams& _params)
+    : inst(_inst), params(_params), current_sol(_initial_sol), best_sol(_initial_sol) {
     initOps();
 }
 
 void ALNS_QLearning::initOps() {
-    destroy_ops.push_back(randomRemoval);
-    destroy_ops.push_back(routeRemoval);
-    destroy_ops.push_back([](Solution& sol, int q) { worstRemoval(sol, q); });
-    destroy_ops.push_back([](Solution& sol, int q) { shawRemoval(sol, q); });
-    destroy_ops.push_back([](Solution& sol, int q) { timeWindowRemoval(sol, q); });
-    destroy_ops.push_back([](Solution& sol, int q) { removeSmallestRoute(sol); });
-
-    repair_ops.push_back([](Solution& sol, bool anr) { greedyInsertion(sol, anr); });
-    repair_ops.push_back([](Solution& sol, bool anr) { regret2Insertion(sol, anr); });
-    repair_ops.push_back([](Solution& sol, bool anr) { regret3Insertion(sol, anr); });
-    repair_ops.push_back([](Solution& sol, bool anr) { pGreedyInsertion(sol, anr); });
-
-    // Mismo orden que destroy_ops. Solo removeSmallestRoute es un operador de
-    // eliminacion de ruta propiamente dicho: vacia UNA sola ruta (la mas
-    // chica), que es el unico caso en que exigir "cero rutas nuevas" es
-    // alcanzable. routeRemoval vacia rutas enteras hasta juntar q clientes
-    // (1-5 rutas en instancias R/RC); exigirle cero rutas nuevas lo volveria
-    // infactible casi siempre y lo anularia como operador.
-    destroy_is_route_elimination = {false, false, false, false, false, true};
+    int n_customers = inst.clients.size() - 1;
+    buildOperatorPool(n_customers, params, destroy_ops, repair_ops);
 
     // Una accion por PAR (destroy, repair).
     num_actions = static_cast<int>(destroy_ops.size() * repair_ops.size());
+    num_states = (params.state_mode == 1) ? 6 : 2;
     Q.assign(static_cast<size_t>(num_states), std::vector<double>(num_actions, 0.0));
+}
+
+// Estado = mejoro/no mejoro (+ nivel de estancamiento si state_mode = 1).
+// Umbrales relativos al limite de reinicio: <20% (progresando), <67%
+// (desacelerando), resto (atascada, cerca del reinicio).
+int ALNS_QLearning::stateOf(bool improved, int iters_since_best) const {
+    int base = improved ? 1 : 0;
+    if (params.state_mode != 1) return base;
+
+    int limit = tuning::STAGNATION_LIMIT > 0 ? tuning::STAGNATION_LIMIT : 1500;
+    int level;
+    if (iters_since_best < limit / 5) level = 0;
+    else if (iters_since_best < (2 * limit) / 3) level = 1;
+    else level = 2;
+    return level * 2 + base;
 }
 
 int ALNS_QLearning::destroyOf(int action) const {
@@ -44,9 +43,9 @@ int ALNS_QLearning::repairOf(int action) const {
 }
 
 // Compresion logaritmica de una mejora relativa (ver nota de escala en el .h).
-double ALNS_QLearning::shapeImprovement(double relative_gain) {
+double ALNS_QLearning::shapeImprovement(double relative_gain) const {
     if (relative_gain <= 0.0) return 0.0;
-    return std::log1p(reward_gain * relative_gain);
+    return std::log1p(params.reward_gain * relative_gain);
 }
 
 int ALNS_QLearning::selectAction(int state, double epsilon) {
@@ -82,53 +81,46 @@ bool ALNS_QLearning::accept(double cand_cost, double curr_cost, double current_t
     return distr(rng) < prob;
 }
 
-Solution ALNS_QLearning::solve(int max_iters, bool save_metrics) {
+Solution ALNS_QLearning::solve(int max_iters) {
     double initial_d = current_sol.total_distance;
     start_temp = -(tuning::TEMP_SCALE * initial_d) / std::log(0.5);
     double T = start_temp;
 
-    int n_customers = inst.clients.size() - 1;
-
-    // Mismo grado de destruccion que ALNS clasico (misma base).
-    int q_min = std::max(4, static_cast<int>(0.10 * n_customers));
-    int q_max = std::max(q_min + 1, static_cast<int>(0.4 * n_customers));
-    std::uniform_int_distribution<int> q_distr(q_min, q_max);
-
     double curr_cost = cost(current_sol);
     double best_cost = cost(best_sol);
 
-    double epsilon = epsilon_0;
+    double epsilon = 1.0;
 
     // Costo de oportunidad: maxima mejora registrada en la corrida. Es lo que
     // se le cobra a una iteracion que no mejoro nada, de modo que un operador
     // improductivo reciba recompensa NEGATIVA en vez de 0. Con recompensa 0
     // (el w4 del ALNS clasico) un operador que nunca funciona se queda cerca
     // del valor inicial de la tabla y sigue compitiendo con el resto.
+    // Con opp_ema > 0 se usa la media movil de las mejoras en lugar del maximo:
+    // el maximo queda fijado por la primera eliminacion de vehiculo (~6.5 en
+    // escala log) y desde entonces cada fracaso pesa ~10x una buena mejora de
+    // distancia, lo que vuelve la tabla un simple "gana-sigue / pierde-cambia".
     double opportunity_cost = 0.0;
+    bool opportunity_init = false;
 
     // Constante de normalizacion del factor e/C: pondera mas las mejoras
     // tardias, que son las dificiles, sobre las tempranas.
     const double C = static_cast<double>(max_iters);
 
-    int state = 0; // s = 0: la iteracion previa no logro mejora
+    int state = stateOf(false, 0); // la iteracion previa no logro mejora
     int iters_since_best = 0;
 
     for (int iter = 1; iter <= max_iters; ++iter) {
         Solution candidate = current_sol;
-        int q = q_distr(rng);
 
         // Durante el learning loop inicial la accion es 100% aleatoria, para
         // poblar la tabla Q antes de empezar a explotarla.
-        double eps_now = (iter <= learning_loop) ? 1.0 : epsilon;
+        double eps_now = (iter <= params.learning_loop) ? 1.0 : epsilon;
         int action = selectAction(state, eps_now);
         int d_idx = destroyOf(action);
         int r_idx = repairOf(action);
 
-        destroy_ops[d_idx](candidate, q);
-        if (destroy_is_route_elimination[d_idx])
-            repairTryEliminateRoute(candidate, repair_ops[r_idx]);
-        else
-            repair_ops[r_idx](candidate, true);
+        applyOperators(candidate, destroy_ops[d_idx], repair_ops[r_idx], rng);
 
         // Mejoras relativas medidas ANTES de mover best/current.
         // cost() no penaliza clientes sin asignar (eso solo lo hace
@@ -166,25 +158,25 @@ Solution ALNS_QLearning::solve(int max_iters, bool save_metrics) {
         // que la ruleta -- la media del score por operador -- y ambos metodos
         // terminan ordenando los operadores igual. Aqui, en cambio, una mejora
         // del 4% y una del 0.01% dejan rastros distintos en la tabla.
-        double improvement = eta * shapeImprovement(delta_global)
-                           + (1.0 - eta) * shapeImprovement(delta_local);
+        double improvement = params.eta * shapeImprovement(delta_global)
+                           + (1.0 - params.eta) * shapeImprovement(delta_local);
         bool improved = improvement > 0.0;
 
         double scale = static_cast<double>(iter) / C;
         double reward;
         if (improved) {
             reward = improvement * scale;
-            opportunity_cost = std::max(opportunity_cost, improvement);
+            if (params.opp_ema <= 0.0)
+                opportunity_cost = std::max(opportunity_cost, improvement);
+            else if (!opportunity_init)
+                opportunity_cost = improvement;
+            else
+                opportunity_cost = (1.0 - params.opp_ema) * opportunity_cost + params.opp_ema * improvement;
+            opportunity_init = true;
         } else {
             reward = (improvement - opportunity_cost) * scale;
         }
 
-        int next_state = improved ? 1 : 0;
-
-        double max_next_q = *std::max_element(Q[next_state].begin(), Q[next_state].end());
-        Q[state][action] += alpha * (reward + gamma * max_next_q - Q[state][action]);
-
-        state = next_state;
 
         // Reinicio por estancamiento (capa externa del bucle de dos capas):
         // tras STAGNATION_LIMIT iteraciones sin mejorar el mejor global, la
@@ -199,8 +191,18 @@ Solution ALNS_QLearning::solve(int max_iters, bool save_metrics) {
             iters_since_best = 0;
         }
 
+        int next_state = stateOf(improved, iters_since_best);
+
+        double max_next_q = *std::max_element(Q[next_state].begin(), Q[next_state].end());
+        Q[state][action] += params.alpha * (reward + params.gamma * max_next_q - Q[state][action]);
+
+        state = next_state;
+
         T = T * cooling_rate;
-        if (iter > learning_loop) epsilon = std::max(epsilon_min, epsilon * beta);
+        if (iter > params.learning_loop) epsilon = std::max(params.epsilon_min, epsilon * params.beta);
+
+        if (params.checkpoint_every > 0 && iter % params.checkpoint_every == 0)
+            std::cout << "[CHECKPOINT] " << iter << " " << best_sol.used_vehicles << " " << best_sol.total_distance << "\n";
     }
     return best_sol;
 }

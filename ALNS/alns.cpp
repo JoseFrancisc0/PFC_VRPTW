@@ -1,40 +1,14 @@
 #include "alns.h"
+#include <iostream>
 
-ALNS::ALNS(const Instance& _inst, const Solution& _initial_sol) 
-    : inst(_inst), current_sol(_initial_sol), best_sol(_initial_sol) {
+ALNS::ALNS(const Instance& _inst, const Solution& _initial_sol, const SolverParams& _params)
+    : inst(_inst), params(_params), current_sol(_initial_sol), best_sol(_initial_sol) {
     initOps();
 }
 
 void ALNS::initOps() {
-    destroy_ops.push_back(randomRemoval);
-    destroy_ops.push_back(routeRemoval);
-    destroy_ops.push_back([](Solution& sol, int q) {
-        worstRemoval(sol, q);
-    });
-    destroy_ops.push_back([](Solution& sol, int q) {
-        shawRemoval(sol, q);
-    });
-    destroy_ops.push_back([](Solution& sol, int q) {
-        timeWindowRemoval(sol, q);
-    });
-    destroy_ops.push_back([](Solution& sol, int q) {
-        removeSmallestRoute(sol);
-    });
-
-    repair_ops.push_back([](Solution& sol, bool anr) { greedyInsertion(sol, anr); });
-    repair_ops.push_back([](Solution& sol, bool anr) { regret2Insertion(sol, anr); });
-    repair_ops.push_back([](Solution& sol, bool anr) { regret3Insertion(sol, anr); });
-    repair_ops.push_back([](Solution& sol, bool anr) {
-        pGreedyInsertion(sol, anr);
-    });
-
-    // Mismo orden que destroy_ops. Solo removeSmallestRoute es un operador de
-    // eliminacion de ruta propiamente dicho: vacia UNA sola ruta (la mas
-    // chica), que es el unico caso en que exigir "cero rutas nuevas" es
-    // alcanzable. routeRemoval vacia rutas enteras hasta juntar q clientes
-    // (1-5 rutas en instancias R/RC); exigirle cero rutas nuevas lo volveria
-    // infactible casi siempre y lo anularia como operador.
-    destroy_is_route_elimination = {false, false, false, false, false, true};
+    int n_customers = inst.clients.size() - 1;
+    buildOperatorPool(n_customers, params, destroy_ops, repair_ops);
 
     int num_destroy = destroy_ops.size();
     destroy_weights.assign(num_destroy, 1.0);
@@ -110,11 +84,6 @@ Solution ALNS::solve(int max_iters) {
     double initial_d = current_sol.total_distance;
     start_temp = -(tuning::TEMP_SCALE * initial_d) / std::log(0.5);
     double T = start_temp;
-    int n_customers = inst.clients.size() - 1;
-
-    int q_min = std::max(4, static_cast<int>(0.10 * n_customers));
-    int q_max = std::max(q_min + 1, static_cast<int>(0.4 * n_customers));
-    std::uniform_int_distribution<int> q_distr(q_min, q_max);
 
     double curr_cost = cost(current_sol);
     double best_cost = cost(best_sol);
@@ -123,18 +92,13 @@ Solution ALNS::solve(int max_iters) {
 
     for (int iter = 1; iter <= max_iters; ++iter) {
         Solution candidate = current_sol;
-        int q = q_distr(rng); // Grado de destruccion (cuantos clientes se busca eliminar)
 
-        // Seleccion de operadores
+        // Seleccion de operadores (ruleta de pesos adaptativos)
         int d_idx = selectDestroyOp();
         int r_idx = selectRepairOp();
 
-        // r(d(x))
-        destroy_ops[d_idx](candidate, q);
-        if (destroy_is_route_elimination[d_idx])
-            repairTryEliminateRoute(candidate, repair_ops[r_idx]);
-        else
-            repair_ops[r_idx](candidate, true);
+        // r(d(x)), con el grado de destruccion propio del destroy elegido
+        applyOperators(candidate, destroy_ops[d_idx], repair_ops[r_idx], rng);
 
         // Evaluacion y scores
         double score = w4; // por defecto, incluye candidato infactible
@@ -195,6 +159,9 @@ Solution ALNS::solve(int max_iters) {
 
         // Actualizacion de temperatura
         T = T * cooling_rate;
+
+        if (params.checkpoint_every > 0 && iter % params.checkpoint_every == 0)
+            std::cout << "[CHECKPOINT] " << iter << " " << best_sol.used_vehicles << " " << best_sol.total_distance << "\n";
     }
 
     return best_sol;

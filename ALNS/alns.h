@@ -6,28 +6,23 @@
 #include <string>
 #include "../Operators/operators.h"
 #include "../Utils/tuning.h"
-
-using DestroyOp = std::function<void(Solution&, int)>;
-using RepairOp  = std::function<void(Solution&, bool)>;
+#include "../Utils/params.h"
+#include "operator_pool.h"
 
 class ALNS {
     public:
-        ALNS(const Instance& _inst, const Solution& _initial_sol);
+        ALNS(const Instance& _inst, const Solution& _initial_sol, const SolverParams& _params = SolverParams());
         Solution solve(int max_iters);
 
     private:
         const Instance& inst;
+        SolverParams params;
         Solution current_sol;
         Solution best_sol;
 
-        // Operadores de destroy (Omega^-)
-        std::vector<DestroyOp> destroy_ops;
+        // Operadores de destroy (Omega^-), pool compartido con ALNS_QLearning
+        std::vector<DestroyEntry> destroy_ops;
         std::vector<double> destroy_weights;
-
-        // Marca los destroy cuyo proposito es eliminar una ruta: tras ellos el
-        // repair intenta primero no abrir rutas nuevas, para que el intento de
-        // eliminacion no lo deshaga el propio repair.
-        std::vector<bool> destroy_is_route_elimination;
 
         // Operadores de repair (Omega^+)
         std::vector<RepairOp> repair_ops;

@@ -7,29 +7,26 @@
 #include <cmath>
 #include <algorithm>
 #include <numeric>
-#include <random> 
+#include <random>
 #include "../Operators/operators.h"
 #include "../Utils/tuning.h"
-
-using DestroyOp = std::function<void(Solution&, int)>;
-using RepairOp  = std::function<void(Solution&, bool)>;
+#include "../Utils/params.h"
+#include "operator_pool.h"
 
 class ALNS_QLearning {
     public:
-        ALNS_QLearning(const Instance& _inst, const Solution& _initial_sol);
-        Solution solve(int max_iters, bool save_metrics = false);
+        ALNS_QLearning(const Instance& _inst, const Solution& _initial_sol, const SolverParams& _params = SolverParams());
+        Solution solve(int max_iters);
 
     private:
         const Instance& inst;
+        SolverParams params;
         Solution current_sol;
         Solution best_sol;
 
-        std::vector<DestroyOp> destroy_ops;
+        // Pool de operadores compartido con ALNS clasico (operator_pool.h).
+        std::vector<DestroyEntry> destroy_ops;
         std::vector<RepairOp> repair_ops;
-
-        // Marca los destroy cuyo proposito es eliminar una ruta (ver alns.h:
-        // el tratamiento es identico en ambos solvers, es base compartida).
-        std::vector<bool> destroy_is_route_elimination;
 
         // Mismo esquema de enfriamiento SA, mismo cost() y mismo grado de
         // destruccion que ALNS clasico: la unica diferencia entre ambos
@@ -48,48 +45,38 @@ class ALNS_QLearning {
         int num_actions = 0;
 
         // --- Espacio de estados ------------------------------------------
-        // S = {0, 1}: 1 si la iteracion previa logro alguna mejora (global o
-        // local), 0 si no. Estado minimo y bien muestreado: con 2 estados y
-        // 24 acciones son 48 celdas, ~500 visitas cada una en una corrida de
-        // 25k iteraciones. Particionar mas (p.ej. agregando fase temporal)
-        // fragmenta la muestra sin aportar informacion accionable.
-        static constexpr int num_states = 2;
+        // state_mode = 0: S = {0, 1}, 1 si la iteracion previa logro alguna
+        // mejora (global o local). Con 2 estados y 24 acciones son 48 celdas,
+        // ~500 visitas cada una en una corrida de 25k iteraciones.
+        // state_mode = 1: se cruza con 3 niveles de estancamiento (iteraciones
+        // desde la ultima mejora del mejor global, relativas al limite de
+        // reinicio), 6 estados. El estancamiento es la unica senal barata que
+        // distingue "la busqueda progresa" de "la busqueda esta atascada", que
+        // es donde conviene cambiar de operadores.
+        int num_states = 2;
+        int stateOf(bool improved, int iters_since_best) const;
 
         std::vector<std::vector<double>> Q;
 
         // --- Hiperparametros de Q-learning --------------------------------
-        // Valores sintonizados por RSM / Box-Behnken sobre el problema origen.
-        // OJO con alpha: en VRPTW con 25k iteraciones la tasa de exito por
-        // iteracion es baja (pocas mejoras entre muchos fracasos), y alpha=0.5
-        // da un horizonte efectivo de ~2 muestras, o sea una estimacion muy
-        // reactiva. Es el primer hiperparametro a ablacionar (0.5 -> 0.1 -> 0.05)
-        // si la politica resulta demasiado ruidosa.
-        double alpha = 0.5;          // tasa de aprendizaje (constante)
-        double gamma = 0.7;          // factor de descuento
-        double epsilon_0 = 1.0;      // exploracion inicial
-        double beta = 0.99;          // decaimiento de epsilon por paso
-        double epsilon_min = 0.01;   // piso de exploracion (salvaguarda)
-        // Con beta=0.99 epsilon cae de 1.0 al piso en ~460 pasos tras el warm-up.
-        // learning_loop es absoluto, no proporcional: con presupuestos chicos
-        // (<= 1000 iteraciones) conviene reducirlo.
-        int learning_loop = 200;     // iteraciones iniciales 100% aleatorias
-        double eta = 0.8;            // peso de la mejora global en la recompensa
-
+        // Viven en 'params' (Utils/params.h) para poder barrerlos sin
+        // recompilar. Referencia: alpha=0.5, gamma=0.7, epsilon_min=0.01,
+        // beta=0.99, learning_loop=200, eta=0.8.
+        //
         // --- Escala de la recompensa (adaptacion a VRPTW) ------------------
         // Con cost = 10000*veh + dist la mejora relativa abarca ~4 ordenes de
         // magnitud: ~1e-5 para un ajuste de distancia y ~1e-1 para eliminar un
         // vehiculo. Usando la mejora cruda, los (raros) eventos de vehiculo
         // dominan la media por operador y el estimador se vuelve de varianza
         // alta, que es justo lo que hace que un argmax elija ruido. La
-        // compresion log1p(gain*delta) preserva el orden -- un vehiculo menos
-        // sigue valiendo ~7x una buena mejora de distancia -- pero acota el
-        // rango para que la media sea estable.
-        static constexpr double reward_gain = 1.0e4;
+        // compresion log1p(reward_gain*delta) preserva el orden -- un vehiculo
+        // menos sigue valiendo ~7x una buena mejora de distancia -- pero acota
+        // el rango para que la media sea estable.
 
         void initOps();
         int selectAction(int state, double epsilon);
         bool accept(double cand_cost, double curr_cost, double current_temp);
-        static double shapeImprovement(double relative_gain);
+        double shapeImprovement(double relative_gain) const;
         int destroyOf(int action) const;
         int repairOf(int action) const;
 };

@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 
+from stats_utils import VEHICLE_WEIGHT, comparar_pareado
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ANALISIS_DIR = os.path.join(BASE_DIR, "Analisis")
 TABLAS_DIR = os.path.join(ANALISIS_DIR, "Tablas")
@@ -12,10 +14,12 @@ GRAFICOS_DIR = os.path.join(ANALISIS_DIR, "Graficos")
 os.makedirs(TABLAS_DIR, exist_ok=True)
 os.makedirs(GRAFICOS_DIR, exist_ok=True)
 
-# Ponderacion del GAP Unificado: debe ser identica a VEHICLE_COST en
-# "VRPTW Environment/solution.cpp" (funcion cost()), que es lo que ambos
-# solvers realmente optimizan. Si ese valor cambia en el C++, actualizar aca.
-VEHICLE_WEIGHT = 10000
+# Ponderacion del GAP Unificado (VEHICLE_WEIGHT, en stats_utils.py): debe ser
+# identica a VEHICLE_COST en "VRPTW Environment/solution.cpp" (funcion cost()),
+# que es lo que ambos solvers realmente optimizan.
+
+# Permite analizar otro CSV de resultados: python analyze_results.py <archivo.csv>
+RESULTS_CSV = sys.argv[1] if len(sys.argv) > 1 else "resultados_ejecuciones_iterativas.csv"
 
 class Logger:
     def __init__(self, filename):
@@ -40,7 +44,7 @@ en esta metrica. Se reporta junto a GAP_Vehiculos(%) y GAP_Distancia(%), que
 son gaps independientes por objetivo (no ponderados entre si).
 """)
 
-df_res = pd.read_csv(os.path.join(BASE_DIR, "resultados_ejecuciones_iterativas.csv"))
+df_res = pd.read_csv(os.path.join(BASE_DIR, RESULTS_CSV))
 df_sintef = pd.read_csv(os.path.join(BASE_DIR, "sintef.csv"), sep=";", encoding="latin1")
 
 df_sintef.columns = ["Instancia", "BKS_Vehiculos", "BKS_Distancia"]
@@ -195,7 +199,8 @@ print("-" * sep_len)
 # --- GRAFICOS ---
 sns.set_theme(style="whitegrid")
 
-# Create df_melted for boxplots based on the individual 10 runs
+# Corridas individuales (el numero de runs se detecta de las columnas)
+run_ids = sorted(int(c[len("Veh_Run"):]) for c in df.columns if c.startswith("Veh_Run"))
 runs_data = []
 for _, row in df.iterrows():
     inst = row["Instancia"]
@@ -205,7 +210,7 @@ for _, row in df.iterrows():
     bks_dist = row["BKS_Distancia"]
     cost_bks = row["Cost_BKS"]
     
-    for i in range(1, 11): 
+    for i in run_ids:
         col_veh = f"Veh_Run{i}"
         col_dist = f"Dist_Run{i}"
         if col_veh in row and pd.notna(row[col_veh]) and row[col_veh] != "":

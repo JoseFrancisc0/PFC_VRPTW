@@ -87,6 +87,7 @@ void greedyInsertion(Solution& sol, bool allow_new_routes){
             }
             else
                 sol.routes.push_back(Route());
+                sol.routes.back().recalculate(sol.inst);
         }
     }
 
@@ -169,6 +170,7 @@ void regret2Insertion(Solution& sol, bool allow_new_routes){
             }
             else
                 sol.routes.push_back(Route());
+                sol.routes.back().recalculate(sol.inst);
         }
     }
 
@@ -262,6 +264,7 @@ void regret3Insertion(Solution& sol, bool allow_new_routes){
             }
             else
                 sol.routes.push_back(Route());
+                sol.routes.back().recalculate(sol.inst);
         }
     }
 
@@ -328,6 +331,7 @@ void pGreedyInsertion(Solution& sol, bool allow_new_routes, double eta){
             }
             else
                 sol.routes.push_back(Route());
+                sol.routes.back().recalculate(sol.inst);
         }
     }
 
@@ -412,6 +416,7 @@ void greedyInsertionRelaxed(Solution& sol){
         else {
             // Si incluso relajado no pudo (posiblemente por capacidad estricta), crea nueva
             sol.routes.push_back(Route());
+            sol.routes.back().recalculate(sol.inst);
         }
     }
     sol.updateMetrics();
@@ -476,6 +481,7 @@ void regret2InsertionRelaxed(Solution& sol){
         }
         else {
             sol.routes.push_back(Route());
+            sol.routes.back().recalculate(sol.inst);
         }
     }
     sol.updateMetrics();
@@ -551,6 +557,7 @@ void regret3InsertionRelaxed(Solution& sol){
         }
         else {
             sol.routes.push_back(Route());
+            sol.routes.back().recalculate(sol.inst);
         }
     }
     sol.updateMetrics();
@@ -599,6 +606,7 @@ void pGreedyInsertionRelaxed(Solution& sol, double eta){
         }
         else {
             sol.routes.push_back(Route());
+            sol.routes.back().recalculate(sol.inst);
         }
     }
     sol.updateMetrics();
