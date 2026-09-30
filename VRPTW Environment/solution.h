@@ -17,6 +17,7 @@ class Solution {
         // Funcion objetivo f_1 y f_2
         int used_vehicles = 0;
         double total_distance = 0.0;
+        double total_lateness = 0.0;
 
         Solution(const Instance& _inst) : inst(_inst) {
             generateInitialSolution();
@@ -33,5 +34,6 @@ class Solution {
 };
 
 double cost(const Solution& sol);
+double cost_phase1(const Solution& sol);
 
 #endif //SOLUTION_H

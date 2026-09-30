@@ -31,6 +31,7 @@ struct Route {
     std::vector<int> path;
     double load = 0.0;
     double distance = 0.0;
+    double lateness = 0.0;
 
     // Para evaluaciones O(1)
     std::vector<double> arrival_times;
@@ -59,13 +60,13 @@ class Instance {
         std::vector<std::vector<bool>> is_reachable;
 
         Instance(const std::string& path) {
-            loadInstance(path);
+            loadSolomon(path);
             precomputeDistances();
             precomputeFeasibility();
         }
     
     private:
-        void loadInstance(const std::string& path);
+        void loadSolomon(const std::string& path);
         void precomputeDistances();
         void precomputeFeasibility();
 };

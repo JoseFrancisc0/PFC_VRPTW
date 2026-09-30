@@ -5,57 +5,55 @@
 #include <functional>
 #include <string>
 #include "../Operators/operators.h"
-
-struct IterationData {
-    int iter;
-    int best_vehicles;
-    double best_distance;
-    int curr_vehicles;
-    double curr_distance;
-    int d_idx;
-    int r_idx;
-    double score;
-    double temp;
-    std::vector<double> d_weights;
-    std::vector<double> r_weights;
-};
-
-using DestroyOp = std::function<void(Solution&, int)>;
-using RepairOp  = std::function<void(Solution&)>;
+#include "../Utils/tuning.h"
+#include "../Utils/params.h"
+#include "operator_pool.h"
 
 class ALNS {
     public:
-        ALNS(const Instance& _inst, const Solution& _initial_sol);
-        Solution solve(int max_iters, bool save_metrics=false);
-        void exportMetrics(const std::string& filename);
+        ALNS(const Instance& _inst, const Solution& _initial_sol, const SolverParams& _params = SolverParams());
+        Solution solve(int max_iters);
 
     private:
         const Instance& inst;
+        SolverParams params;
         Solution current_sol;
         Solution best_sol;
 
-        std::vector<IterationData> history;
-
-        std::vector<DestroyOp> destroy_ops;
+        // Operadores de destroy (Omega^-), pool compartido con ALNS_QLearning
+        std::vector<DestroyEntry> destroy_ops;
         std::vector<double> destroy_weights;
 
+        // Operadores de repair (Omega^+)
         std::vector<RepairOp> repair_ops;
         std::vector<double> repair_weights;
 
+        // Hiperparametros del ALNS
         double decay = 0.9;
         double w1 = 33.0;
         double w2 = 13.0;
         double w3 = 9.0;
         double w4 = 0.0;
 
+        // Actualizacion de pesos por segmento (Ropke & Pisinger): los scores se
+        // acumulan durante 'segment_size' iteraciones y los pesos se actualizan
+        // una sola vez al cierre del segmento, con el promedio del segmento.
+        static const int segment_size = 100;
+        std::vector<double> destroy_scores;
+        std::vector<int> destroy_uses;
+        std::vector<double> repair_scores;
+        std::vector<int> repair_uses;
+
+        // Hiperparametros del Simulated Annealing
         double start_temp;
-        double cooling_rate = 0.9998;
+        double cooling_rate = 0.9995;
 
         void initOps();
         int selectDestroyOp();
         int selectRepairOp();
-        bool accept(const Solution& cand, const Solution& curr, double T);
-        void updateWeights(int used_destroy_idx, int used_repair_idx, double score);
+        bool accept(double cand_cost, double curr_cost, double current_temp);
+        void registerScore(int used_destroy_idx, int used_repair_idx, double score);
+        void updateWeightsSegment();
 };
 
-#endif
+#endif //ALNS_H

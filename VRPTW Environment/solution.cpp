@@ -44,11 +44,13 @@ Solution& Solution::operator=(const Solution& other) {
 void Solution::updateMetrics() {
     used_vehicles = 0;
     total_distance = 0.0;
+    total_lateness = 0.0;
 
     for (const Route& route: routes) {
         if (route.path.size() > 2) {
             used_vehicles++;
             total_distance += route.distance;
+            total_lateness += route.lateness;
         }
     }
 }
@@ -130,8 +132,17 @@ void Solution::generateInitialSolution() {
     updateMetrics();
 }
 
-// Calcular costos de solucion
+// Calcular costos de solucion (Fase 2)
 double cost(const Solution& sol) {
-    const double VEHICLE_COST = 50000.0;
+    const double VEHICLE_COST = 10000.0;
     return (sol.used_vehicles * VEHICLE_COST) + sol.total_distance;
+}
+
+// Calcular costos de solucion en la Fase 1 (Penaliza lateness y clientes sin asignar)
+double cost_phase1(const Solution& sol) {
+    const double VEHICLE_COST = 100000.0; // Aumentado a 100k para asegurar dominancia
+    const double LATENESS_PENALTY = 10.0;  // Reducido a 10
+    const double UNASSIGNED_PENALTY = 500000.0;
+    return (sol.used_vehicles * VEHICLE_COST) + sol.total_distance + 
+           (sol.total_lateness * LATENESS_PENALTY) + (sol.unassigned.size() * UNASSIGNED_PENALTY);
 }
