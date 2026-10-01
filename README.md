@@ -1,48 +1,67 @@
-# PFC1: ALNSQ para VRPTW
+# PFC2: ALNS vs ALNS-Q para VRPTW
 
-### Archivos de implementación de los algoritmos
-* `'VRPTW Environment'/`: Estructuras de datos para los elementos del problema VRPTW (cliente, ruta, instancia) y clase Solution para las soluciones del problema a optimizar
-* `Operators/`: operadores de destrucción y reparación
-* `ALNS/`: implementación de algoritmos ALNS y ALNS-Q
-* `Utils/`: funciones de utilidad para la ejecución de experimentos
-* `solomon-100`: benchmark de las 56 instancias de Solomon de 100 clientes
+### Codigo del solver (C++)
+* `VRPTW Environment/`: instancia, rutas y clase `Solution`
+* `Operators/`: operadores de destruccion y reparacion
+* `ALNS/`: `alns.cpp` (ruleta clasica), `alns_qlearning.cpp` (Q-learning) y `operator_pool.h` (pool compartido)
+* `Utils/`: verificador de soluciones, `params.h` (parametros `clave=valor` en tiempo de ejecucion) y `tuning.h` (interruptores de compilacion)
+* `main.cpp`: `ALNS_VRPTW.exe <instancia> <CLASSIC|QLEARNING> <iters> [semilla] [clave=valor ...]`.
+  Imprime `[FINAL_RESULT] ...` (lo lee `automate0.py`) y `RESULT;...;cpu_time=...;valid=...` (lo lee `automate.py`).
 
-### Resultados y análisis de experimentos computacionales
-* `Results/`: archivo de resultados y rutas solución de ALNS y ALNS-Q para cada ejecución
-* `Experiments/`:
-    * `automate.py`: para automatizar los experimentos (1120 ejecuciones)
-    * `verify.py`: verificador de todas las ejecuciones de la experimentación
-    * `analisis.ipynb`: notebook de análisis
-    * `df_master_cache.csv`: archivo CSV del acumulado de todas las ejecuciones de los experimentos
-    * `sintef.csv`: archivo CSV de los BKS del SINTEF
-    * `Tabla_Promedio_56_instancias.csb`: archivo CSV de las soluciones promedio + métricas de cada algoritmo por instancia
+### Benchmarks
+* `homberger-{200,400,600,800,1000}/`: Gehring & Homberger, subcarpetas por clase
+* `solomon-100/`: Solomon, 56 instancias
 
-### Utilidades opcionales
-* `Graficos`: gráficos de comparación de la best run de cada algoritmo
-* `Mapper`: visualización de rutas de cierta ejecución
-No se aplicaron al proyecto puesto que el análisis se realizó sobre el promedio de métricas de las 10 ejecuciones por instancia, en lugar de ejecuciones puntuales.
+## 1. Compilar
 
-### Abandonado / Próximo a eliminar
-* `DQN_Pipeline`: archivos residuales de una prueba con DQN.
-
-### Nota de ejecución de pruebas
-
-Tres pasadas:
-
-1. Pasada de calidad en paralelo
+Requiere MSYS2 UCRT64 (g++) y CMake. Desde la raiz:
 
 ```
-python automate.py quality --benchmark ../solomon-100 --master ../res2/master_quality.csv --iters 25000 --runs 10 --workers 8
+cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
 ```
 
-2. Pasada de tiempos
+Genera `build/ALNS_VRPTW.exe` (enlazado estatico, no depende del PATH). Recompilar tras cualquier cambio en `.cpp`/`.h`.
+
+## 2. Organizacion de `Experiments/`
+
+| Carpeta | Contenido | Quien lo genera |
+|---|---|---|
+| `results/` | Crudo: una fila por corrida (instancia, algoritmo, run, veh, dist, cpu, valid) | `automate.py`, `automate_solomon.py` (corrida a corrida) |
+| `sintef/` | BKS de referencia | a mano (entrada) |
+| `summary/` | Agregado por instancia: promedio de los runs + DIF f1 / GAP f2 vs BKS | `analyze_results.py`, `analyze_results_solomon.py` |
+| `figs/` | Graficos | `analyze_results.py`, `analyze_results_solomon.py` |
+
+Cada ejecucion **sobrescribe** sus archivos en `results/`, `summary/` y `figs/`; las versiones
+anteriores quedan en el historial de git.
+
+## 3. Homberger (experimentos PFC2, desde `Experiments/`)
 
 ```
-python automate.py timing --benchmark ../solomon-100 --master ../res2/master_timing.csv --iters 25000 --timing-runs 3
+python automate.py --size 200      # -> results/master_gh200.csv   (1200 corridas)
+python automate.py --size 400
+python automate.py --size 600
+python automate.py --size 800
+python analyze_results.py          # -> summary/resumen_gh<N>.csv + figs/gh<N>/*.png, para cada master existente
 ```
 
-3. Pasada individual
+* Si una campana se corta, lo hecho ya esta guardado: `python automate.py --size 200 --resume` completa lo pendiente
+  (sin `--resume` se empieza de cero y se sobrescribe).
+* Semilla = run, identica para ambos algoritmos (comparacion pareada).
+* Instancias: `gh_sample_manifest_k10_seed20260901.csv` (10 por clase = 60 por tamano), generado una vez con
+  `python sample.py --k 10 --seed 20260901`; no repetir.
+* Paralelo con `--workers` (default: todos los hilos). Vehiculos y distancia no dependen de `--workers`, pero el
+  tiempo de CPU se infla con mas hilos que nucleos fisicos (10): para reportar tiempos usar `--workers 10` o menos.
+* Opcionales: `--dry-run`, `--iters`, `--runs`, `--algos`, `--params clave=valor ...`,
+  `--checkpoint-every N` (convergencia en `results/master_gh<N>_checkpoints.csv`).
+* `analyze_results.py --size N` analiza un solo tamano. Es la version script de
+  `notebooks/analisis_single_campaign_{N}.ipynb` (misma logica y mismas salidas). Los tests de Wilcoxon usan scipy
+  si esta instalado (`pip install scipy`, mismos p-valores que el notebook).
+
+## 4. Solomon-100 (desde `Experiments/`, sin parametros)
 
 ```
-python automate.py trace --instance ../GH-200/rc2/rc204.txt --algo QLEARNING --run 7 --seed 7
+python automate_solomon.py           # -> results/solomon/master_solomon.csv (+ _checkpoints), 1120 corridas
+python analyze_results_solomon.py    # -> summary/solomon/*.csv + conclusiones_comparativas.txt, figs/solomon/*.png
 ```
+Igual que Homberger: sobrescribe por defecto y `--resume` completa una campana cortada.

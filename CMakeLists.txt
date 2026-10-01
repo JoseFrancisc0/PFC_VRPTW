@@ -13,6 +13,13 @@ add_executable(ALNS_VRPTW
 
 target_compile_options(ALNS_VRPTW PRIVATE "-O3")
 
+# Runtime de C++ enlazado estaticamente: el .exe no depende de que la
+# libstdc++-6.dll correcta este primera en el PATH (p.ej. la de Git for Windows
+# es incompatible y hace que el .exe muera sin mensaje, exit 0xC0000005).
+if(MINGW)
+    target_link_options(ALNS_VRPTW PRIVATE -static)
+endif()
+
 include(CTest)
 enable_testing()
 

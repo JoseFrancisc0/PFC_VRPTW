@@ -1,15 +1,44 @@
+"""Campana Homberger (GH) por tamano: CLASSIC vs QLEARNING, en paralelo.
+
+Flujo: manifiesto (sample.py) -> una corrida del .exe por (instancia, algoritmo,
+run) -> una fila por corrida en results/master_gh<size>.csv -> analyze_results.py.
+
+Uso (desde Experiments/):
+    python automate.py --size 200             # SOBRESCRIBE results/master_gh200.csv
+    python automate.py --size 200 --resume    # retoma una campana cortada
+
+El CSV se escribe corrida a corrida (flush inmediato), asi que una campana
+cortada conserva lo hecho y se completa con --resume.
+"""
 import os
 import re
 import csv
 import time
 import argparse
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-EXEC_PATH = "../build/ALNS_VRPTW.exe"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+EXEC_PATH = os.path.join(BASE_DIR, "..", "build", "ALNS_VRPTW.exe")
+MANIFEST = os.path.join(BASE_DIR, "gh_sample_manifest_k10_seed20260901.csv")
+
+ALGORITMOS = ["CLASSIC", "QLEARNING"]
+ITERACIONES = 25000
+RUNS = 10
+MAX_WORKERS = os.cpu_count() or 4
 
 MASTER_FIELDS = ["instance", "size", "class", "algorithm", "seed", "run",
                  "best_veh", "best_dist", "cpu_time", "valid"]
+CHECKPOINT_FIELDS = ["instance", "size", "class", "algorithm", "seed", "run",
+                     "iter", "veh", "dist"]
 RESULT_RE = re.compile(r"^RESULT;(.*)$", re.MULTILINE)
+CHECKPOINT_RE = re.compile(r"\[CHECKPOINT\] (\d+) (\d+) ([\d.eE+-]+)")
+
+
+def semilla(run):
+    """Semilla = run, igual para ambos algoritmos: la corrida k de CLASSIC y la
+    de QLEARNING parten del mismo stream aleatorio (comparacion pareada)."""
+    return run
 
 
 def parse_result_line(stdout):
@@ -24,13 +53,9 @@ def parse_result_line(stdout):
     return fields
 
 
-def cargar_manifiesto(manifest_path, size_filter=None):
-    rows = []
+def cargar_manifiesto(manifest_path, size):
     with open(manifest_path, newline="") as f:
-        for row in csv.DictReader(f):
-            if size_filter is None or int(row["size"]) == size_filter:
-                rows.append(row)
-    return rows
+        return [row for row in csv.DictReader(f) if int(row["size"]) == size]
 
 
 def cargar_hechas(master_path):
@@ -43,49 +68,85 @@ def cargar_hechas(master_path):
     return hechas
 
 
-def abrir_maestro_append(master_path):
-    nuevo = not os.path.exists(master_path) or os.path.getsize(master_path) == 0
-    os.makedirs(os.path.dirname(master_path) or ".", exist_ok=True)
-    f = open(master_path, "a", newline="")
-    writer = csv.DictWriter(f, fieldnames=MASTER_FIELDS)
+def abrir_csv(path, fields, resume):
+    """resume=False: sobrescribe el archivo. resume=True: agrega al final."""
+    nuevo = not resume or not os.path.exists(path) or os.path.getsize(path) == 0
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    f = open(path, "w" if nuevo else "a", newline="")
+    writer = csv.DictWriter(f, fieldnames=fields)
     if nuevo:
         writer.writeheader()
         f.flush()
     return f, writer
 
 
+def ejecutar_corrida(job, iters, params, checkpoint_every):
+    full_path, inst_name, size, cls, algo, run = job
+    seed = semilla(run)
+    extra = list(params)
+    if checkpoint_every > 0:
+        extra.append(f"checkpoint_every={checkpoint_every}")
+    cmd = [EXEC_PATH, full_path, algo, str(iters), str(seed)] + extra
+
+    base = {"instance": inst_name, "size": size, "class": cls,
+            "algorithm": algo, "seed": seed, "run": run}
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as e:
+        return base, None, [], f"exit {e.returncode}: {e.stderr.strip()[-500:]}"
+
+    res = parse_result_line(r.stdout)
+    if res is None:
+        return base, None, [], "sin linea RESULT en la salida"
+
+    fila = dict(base)
+    for k in ("best_veh", "best_dist", "cpu_time", "valid"):
+        fila[k] = res.get(k, "")
+    checkpoints = [dict(base, iter=int(i), veh=int(v), dist=float(d))
+                   for i, v, d in CHECKPOINT_RE.findall(r.stdout)]
+    return base, fila, checkpoints, None
+
+
 def run_campaign(args):
+    if args.master is None:
+        args.master = os.path.join(BASE_DIR, "results", f"master_gh{args.size}.csv")
+    benchmark = args.benchmark or os.path.join(BASE_DIR, "..", f"homberger-{args.size}")
     manifest_rows = cargar_manifiesto(args.manifest, args.size)
     if not manifest_rows:
-        print(f"[ERROR] El manifiesto no tiene instancias" +
-              (f" para size={args.size}" if args.size else "") + ".")
+        print(f"[ERROR] El manifiesto no tiene instancias para size={args.size}.")
         return
 
-    hechas = cargar_hechas(args.master)
+    hechas = cargar_hechas(args.master) if args.resume else set()
 
     jobs = []
     for row in manifest_rows:
         inst_name = os.path.splitext(row["filename"])[0]
-        full_path = os.path.join(args.benchmark, row["relpath"])
+        # El manifiesto guarda relpath con '\' (generado en Windows)
+        relpath = row["relpath"].replace("\\", "/")
+        full_path = os.path.normpath(os.path.join(benchmark, relpath))
         for algo in args.algos:
             for run in range(1, args.runs + 1):
                 if (inst_name.lower(), algo, str(run)) not in hechas:
                     jobs.append((full_path, inst_name, row["size"], row["class"], algo, run))
 
     total = len(manifest_rows) * len(args.algos) * args.runs
-    fase = f"FASE size={args.size}" if args.size else "TODAS las tallas"
-    print(f"=== Campana SECUENCIAL | {fase} ===")
-    print(f"=== Instancias en fase: {len(manifest_rows)} | corridas objetivo: {total} "
+    print(f"=== Campana PARALELA | size={args.size} | hilos: {args.workers} | "
+          f"params: {' '.join(args.params) or '(por defecto)'} ===")
+    print(f"=== Instancias: {len(manifest_rows)} | corridas objetivo: {total} "
           f"| ya hechas: {len(hechas)} | pendientes: {len(jobs)} ===")
-    print(f"=== Maestro: {args.master} (incremental + resume) ===")
+    modo = "RESUME: agrega a lo existente" if args.resume else "SOBRESCRIBE"
+    print(f"=== Maestro: {args.master} ({modo}, se guarda corrida a corrida) ===")
 
     if args.dry_run:
         print("\n[DRY-RUN] No se ejecuta nada. Primeras corridas que se harian:")
         for j in jobs[:10]:
-            print(f"   {j[4]:9s} {j[1]} run{j[5]}")
+            print(f"   {j[4]:9s} {j[1]} run{j[5]} -> {j[0]}")
         print(f"   ... ({len(jobs)} en total)")
         return
 
+    if not os.path.exists(EXEC_PATH):
+        print(f"[ERROR] No existe el ejecutable {EXEC_PATH}. Compila primero (ver README).")
+        return
     faltan = sorted({j[0] for j in jobs if not os.path.exists(j[0])})
     if faltan:
         print(f"[ERROR] {len(faltan)} archivos de instancia no existen. Ejemplos:")
@@ -94,72 +155,70 @@ def run_campaign(args):
         print("Revisa --benchmark y la estructura de carpetas. Abortando.")
         return
 
-    f, writer = abrir_maestro_append(args.master)
-    hecho = len(hechas)
-    base = len(hechas)
+    # Solo el hilo principal escribe los CSV (en el orden en que terminan las
+    # corridas), asi que no hace falta un lock. Cada fila se hace flush de
+    # inmediato: si se corta la campana, relanzar el mismo comando retoma.
+    f, writer = abrir_csv(args.master, MASTER_FIELDS, args.resume)
+    fc, writer_c = (None, None)
+    ckpt_path = args.master.replace(".csv", "_checkpoints.csv")
+    if args.checkpoint_every > 0:
+        fc, writer_c = abrir_csv(ckpt_path, CHECKPOINT_FIELDS, args.resume)
+    elif not args.resume and os.path.exists(ckpt_path):
+        os.remove(ckpt_path)  # no dejar convergencias de una campana anterior
+    hecho = base_hechas = len(hechas)
+    errores = 0
     t0 = time.time()
+    executor = ThreadPoolExecutor(max_workers=args.workers)
     try:
-        for (full_path, inst_name, size, cls, algo, run) in jobs:
-            cmd = [EXEC_PATH, full_path, algo, str(args.iters), str(run)]
-            try:
-                r = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            except subprocess.CalledProcessError as e:
-                print(f"[ERROR] {algo} {inst_name} run{run}\n{e.stderr}")
+        futuros = [executor.submit(ejecutar_corrida, j, args.iters, args.params, args.checkpoint_every)
+                   for j in jobs]
+        for futuro in as_completed(futuros):
+            base, fila, checkpoints, error = futuro.result()
+            tag = f"{base['algorithm']} {base['instance']} run{base['run']}"
+            if error:
+                errores += 1
+                print(f"[ERROR] {tag}: {error}")
                 continue
-            res = parse_result_line(r.stdout)
-            if res is None:
-                print(f"[WARN] sin RESULT: {algo} {inst_name} run{run}")
-                continue
-
-            fila = {k: res.get(k, "") for k in MASTER_FIELDS}
-            fila["instance"] = inst_name
-            fila["size"] = size
-            fila["class"] = cls
             writer.writerow(fila)
             f.flush()
+            if writer_c:
+                writer_c.writerows(checkpoints)
+                fc.flush()
             hecho += 1
-            print(f"[{hecho}/{total}] {algo} {inst_name} run{run} "
-                  f"-> veh={res.get('best_veh')} dist={res.get('best_dist')} "
-                  f"cpu={res.get('cpu_time')}s valid={res.get('valid')}")
+            print(f"[{hecho}/{total}] {tag} -> veh={fila['best_veh']} dist={fila['best_dist']} "
+                  f"cpu={fila['cpu_time']}s valid={fila['valid']}")
+    except KeyboardInterrupt:
+        print("\n[INTERRUPCION] Cancelando corridas pendientes; lo ya escrito se conserva.")
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
     finally:
+        executor.shutdown(wait=True)
         f.close()
+        if fc:
+            fc.close()
 
     dt = time.time() - t0
     h, rem = divmod(dt, 3600); m, s = divmod(rem, 60)
-    print(f"=== Fin {fase}. Nuevas: {hecho - base}. "
+    print(f"=== Fin size={args.size}. Nuevas: {hecho - base_hechas} | errores: {errores} | "
           f"Wall-clock: {int(h)}h {int(m)}m {s:.1f}s ===")
 
 
-def run_trace(args):
-    seed_arg = str(args.seed) if args.seed is not None else str(args.run)
-    cmd = [EXEC_PATH, args.instance, args.algo, str(args.iters), str(args.run), seed_arg, "--trace"]
-    print("Regenerando traza:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
-    print("Traza escrita en ../Results/<algo>/metrics/")
-
-
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Campana secuencial por fases (ALNS / ALNS-Q)")
-    sub = ap.add_subparsers(dest="modo", required=True)
-
-    pc = sub.add_parser("campaign", help="Corre una FASE (por tamano) secuencialmente")
-    pc.add_argument("--manifest", required=True, help="CSV de instancias muestreadas")
-    pc.add_argument("--benchmark", required=True, help="raiz del benchmark (contiene subcarpetas de clase)")
-    pc.add_argument("--master", required=True, help="CSV maestro de salida (sugerido: uno por fase)")
-    pc.add_argument("--size", type=int, default=None, help="filtra la fase: 200/400/600/800/1000")
-    pc.add_argument("--algos", nargs="+", default=["CLASSIC", "QLEARNING"])
-    pc.add_argument("--iters", type=int, default=25000)
-    pc.add_argument("--runs", type=int, default=10)
-    pc.add_argument("--dry-run", action="store_true", help="muestra que se correria, sin ejecutar")
-    pc.set_defaults(func=run_campaign)
-
-    pr = sub.add_parser("trace", help="Regenera la traza de una corrida (visualizer)")
-    pr.add_argument("--instance", required=True)
-    pr.add_argument("--algo", required=True, choices=["CLASSIC", "QLEARNING"])
-    pr.add_argument("--iters", type=int, default=25000)
-    pr.add_argument("--run", type=int, required=True)
-    pr.add_argument("--seed", type=int, default=None)
-    pr.set_defaults(func=run_trace)
-
-    args = ap.parse_args()
-    args.func(args)
+    ap = argparse.ArgumentParser(description="Campana GH por tamano (ALNS / ALNS-Q), en paralelo")
+    ap.add_argument("--size", type=int, required=True, choices=[200, 400, 600, 800, 1000])
+    ap.add_argument("--master", default=None,
+                    help="CSV maestro de salida (default: results/master_gh<size>.csv)")
+    ap.add_argument("--resume", action="store_true",
+                    help="no sobrescribe: agrega solo las corridas que faltan en el maestro")
+    ap.add_argument("--manifest", default=MANIFEST, help="CSV de instancias muestreadas (sample.py)")
+    ap.add_argument("--benchmark", default=None, help="raiz del benchmark (default: ../homberger-<size>)")
+    ap.add_argument("--algos", nargs="+", default=ALGORITMOS)
+    ap.add_argument("--iters", type=int, default=ITERACIONES)
+    ap.add_argument("--runs", type=int, default=RUNS)
+    ap.add_argument("--workers", type=int, default=MAX_WORKERS,
+                    help="corridas simultaneas (default: todos los hilos logicos)")
+    ap.add_argument("--params", nargs="*", default=[], help="clave=valor, ver Utils/params.h")
+    ap.add_argument("--checkpoint-every", type=int, default=0,
+                    help="si > 0, guarda la convergencia en <master>_checkpoints.csv")
+    ap.add_argument("--dry-run", action="store_true", help="muestra que se correria, sin ejecutar")
+    run_campaign(ap.parse_args())
