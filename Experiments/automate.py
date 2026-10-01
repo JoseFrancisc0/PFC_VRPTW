@@ -1,7 +1,8 @@
 """Campana Homberger (GH) por tamano: CLASSIC vs QLEARNING, en paralelo.
 
-Flujo: manifiesto (sample.py) -> una corrida del .exe por (instancia, algoritmo,
-run) -> una fila por corrida en results/master_gh<size>.csv -> analyze_results.py.
+Flujo: una corrida del .exe por (instancia, algoritmo, run) -> una fila por
+corrida en results/master_gh<size>.csv -> notebooks/analisis_single_campaign_<size>.ipynb.
+Se corren las 60 instancias del tamano (10 por clase).
 
 Uso (desde Experiments/):
     python automate.py --size 200             # SOBRESCRIBE results/master_gh200.csv
@@ -20,8 +21,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EXEC_PATH = os.path.join(BASE_DIR, "..", "build", "ALNS_VRPTW.exe")
-MANIFEST = os.path.join(BASE_DIR, "gh_sample_manifest_k10_seed20260901.csv")
 
+CLASES = ["C1", "C2", "R1", "R2", "RC1", "RC2"]
+INDICES = range(1, 11)
 ALGORITMOS = ["CLASSIC", "QLEARNING"]
 ITERACIONES = 25000
 RUNS = 10
@@ -53,9 +55,9 @@ def parse_result_line(stdout):
     return fields
 
 
-def cargar_manifiesto(manifest_path, size):
-    with open(manifest_path, newline="") as f:
-        return [row for row in csv.DictReader(f) if int(row["size"]) == size]
+def instancias(size):
+    """(clase, nombre) de las instancias GH del tamano: <clase>_<size/100>_<1..10>."""
+    return [(cls, f"{cls}_{size // 100}_{idx}") for cls in CLASES for idx in INDICES]
 
 
 def cargar_hechas(master_path):
@@ -111,28 +113,22 @@ def run_campaign(args):
     if args.master is None:
         args.master = os.path.join(BASE_DIR, "results", f"master_gh{args.size}.csv")
     benchmark = args.benchmark or os.path.join(BASE_DIR, "..", f"homberger-{args.size}")
-    manifest_rows = cargar_manifiesto(args.manifest, args.size)
-    if not manifest_rows:
-        print(f"[ERROR] El manifiesto no tiene instancias para size={args.size}.")
-        return
+    insts = instancias(args.size)
 
     hechas = cargar_hechas(args.master) if args.resume else set()
 
     jobs = []
-    for row in manifest_rows:
-        inst_name = os.path.splitext(row["filename"])[0]
-        # El manifiesto guarda relpath con '\' (generado en Windows)
-        relpath = row["relpath"].replace("\\", "/")
-        full_path = os.path.normpath(os.path.join(benchmark, relpath))
+    for cls, inst_name in insts:
+        full_path = os.path.normpath(os.path.join(benchmark, cls, inst_name + ".TXT"))
         for algo in args.algos:
             for run in range(1, args.runs + 1):
                 if (inst_name.lower(), algo, str(run)) not in hechas:
-                    jobs.append((full_path, inst_name, row["size"], row["class"], algo, run))
+                    jobs.append((full_path, inst_name, args.size, cls, algo, run))
 
-    total = len(manifest_rows) * len(args.algos) * args.runs
+    total = len(insts) * len(args.algos) * args.runs
     print(f"=== Campana PARALELA | size={args.size} | hilos: {args.workers} | "
           f"params: {' '.join(args.params) or '(por defecto)'} ===")
-    print(f"=== Instancias: {len(manifest_rows)} | corridas objetivo: {total} "
+    print(f"=== Instancias: {len(insts)} | corridas objetivo: {total} "
           f"| ya hechas: {len(hechas)} | pendientes: {len(jobs)} ===")
     modo = "RESUME: agrega a lo existente" if args.resume else "SOBRESCRIBE"
     print(f"=== Maestro: {args.master} ({modo}, se guarda corrida a corrida) ===")
@@ -210,7 +206,6 @@ if __name__ == "__main__":
                     help="CSV maestro de salida (default: results/master_gh<size>.csv)")
     ap.add_argument("--resume", action="store_true",
                     help="no sobrescribe: agrega solo las corridas que faltan en el maestro")
-    ap.add_argument("--manifest", default=MANIFEST, help="CSV de instancias muestreadas (sample.py)")
     ap.add_argument("--benchmark", default=None, help="raiz del benchmark (default: ../homberger-<size>)")
     ap.add_argument("--algos", nargs="+", default=ALGORITMOS)
     ap.add_argument("--iters", type=int, default=ITERACIONES)

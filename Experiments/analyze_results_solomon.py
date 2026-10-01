@@ -5,8 +5,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 
-from stats_utils import VEHICLE_WEIGHT, comparar_pareado
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Misma organizacion que Homberger: results/ = crudo por corrida (automate),
 # summary/ = tablas agregadas, figs/ = graficos (ambos generados aca).
@@ -15,9 +13,10 @@ GRAFICOS_DIR = os.path.join(BASE_DIR, "figs", "solomon")
 os.makedirs(TABLAS_DIR, exist_ok=True)
 os.makedirs(GRAFICOS_DIR, exist_ok=True)
 
-# Ponderacion del GAP Unificado (VEHICLE_WEIGHT, en stats_utils.py): debe ser
-# identica a VEHICLE_COST en "VRPTW Environment/solution.cpp" (funcion cost()),
-# que es lo que ambos solvers realmente optimizan.
+# Ponderacion del GAP Unificado: debe ser identica a VEHICLE_COST en
+# "VRPTW Environment/solution.cpp" (funcion cost()), que es lo que ambos
+# solvers realmente optimizan.
+VEHICLE_WEIGHT = 10000
 
 # Maestro por corrida de automate_solomon.py. Opcional: python analyze_results_solomon.py <otro_master.csv>
 MASTER_CSV = sys.argv[1] if len(sys.argv) > 1 else os.path.join(BASE_DIR, "results", "solomon", "master_solomon.csv")
