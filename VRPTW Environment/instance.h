@@ -59,6 +59,10 @@ class Instance {
         std::vector<std::vector<double>> dist_mat;
         std::vector<std::vector<bool>> is_reachable;
 
+        // Ranking de clientes por parecido que usa shawRemoval. Se arma en su
+        // primer uso (ver shawOrderOf en Operators/destroy_ops.cpp).
+        mutable std::vector<int> shaw_order;
+
         Instance(const std::string& path) {
             loadSolomon(path);
             precomputeDistances();

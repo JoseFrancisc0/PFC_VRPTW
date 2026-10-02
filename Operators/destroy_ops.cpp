@@ -64,49 +64,204 @@ void routeRemoval(Solution& sol, int q){
     sol.updateMetrics();
 }
 
+// worstRemoval y shawRemoval eligen, en cada extraccion, el candidato que
+// ocupa un cierto puesto en el ranking de todos los clientes en ruta. Rearmar
+// y ordenar ese ranking por cada cliente extraido es lo caro; las dos
+// versiones de abajo lo mantienen de forma incremental y llegan al mismo
+// candidato. Solo queda una ambiguedad posible: si el puesto elegido empata en
+// puntaje con un vecino del ranking, quien queda en ese puesto depende de como
+// std::sort resuelva el empate. En ese caso (raro) se recurre al ranking
+// completo original, de modo que la eleccion es identica siempre.
+namespace {
+
+// Ruta de cada cliente (-1 = no esta en ninguna ruta). Devuelve cuantos hay
+// en ruta.
+int buildRouteOf(const Solution& sol, std::vector<int>& route_of) {
+    int routed = 0;
+    route_of.assign(sol.inst.clients.size(), -1);
+    for (int r = 0; r < sol.routes.size(); ++r) {
+        const Route& route = sol.routes[r];
+        for (int i = 1; i < static_cast<int>(route.path.size()) - 1; ++i) {
+            route_of[route.path[i]] = r;
+            routed++;
+        }
+    }
+    return routed;
+}
+
+inline int nodeIndexOf(const Route& route, int client_id) {
+    return std::find(route.path.begin() + 1, route.path.end() - 1, client_id) - route.path.begin();
+}
+
+// Ahorro de distancia al sacar al cliente de la posicion i de su ruta
+inline double removalCost(const Instance& inst, const Route& route, int i) {
+    int prev = route.path[i-1];
+    int curr = route.path[i];
+    int next = route.path[i+1];
+    return inst.dist_mat[prev][curr] + inst.dist_mat[curr][next] - inst.dist_mat[prev][next];
+}
+
+// Ranking de worstRemoval: mayor ahorro primero
+struct WorstEntry {
+    double cost;
+    int client_id;
+};
+
+inline bool worstBefore(const WorstEntry& a, const WorstEntry& b) {
+    if (a.cost != b.cost) return a.cost > b.cost;
+    return a.client_id < b.client_id;
+}
+
+// Ranking completo, tal como se armaba en cada extraccion
+int worstByFullSort(const Solution& sol, int chosen_idx) {
+    std::vector<RemovalCandidate> candidates;
+
+    for (int r = 0; r < sol.routes.size(); ++r) {
+        const Route& route = sol.routes[r];
+        if (route.path.size() <= 2) continue;
+
+        for (int i = 1; i < route.path.size() - 1; ++i)
+            candidates.push_back({r, i, removalCost(sol.inst, route, i)});
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+        [](const RemovalCandidate& a, const RemovalCandidate& b) {
+            return a.deviation_cost > b.deviation_cost;
+        });
+
+    const RemovalCandidate& chosen = candidates[chosen_idx];
+    return sol.routes[chosen.route_idx].path[chosen.node_idx];
+}
+
+const double SHAW_W_DIST = 9.0;
+const double SHAW_W_TIME = 3.0;
+const double SHAW_W_DEMAND = 2.0;
+
+inline double shawRelatedness(const Instance& inst, int base_client_id, int target_id) {
+    const Client& base_client = inst.clients[base_client_id];
+    const Client& target_client = inst.clients[target_id];
+
+    return (SHAW_W_DIST * inst.dist_mat[base_client_id][target_id]) +
+           (SHAW_W_TIME * std::abs(base_client.ready_time - target_client.ready_time)) +
+           (SHAW_W_DEMAND * std::abs(base_client.demand - target_client.demand));
+}
+
+// La relacion entre dos clientes solo depende de datos de la instancia, asi
+// que el ranking de cada cliente contra todos los demas se arma una sola vez.
+// Fila del cliente c: los otros clientes, del mas al menos parecido.
+const int* shawOrderOf(const Instance& inst, int base_client_id) {
+    int N = inst.clients.size();
+    int stride = N - 2;
+
+    if (inst.shaw_order.empty()) {
+        inst.shaw_order.resize(static_cast<size_t>(N) * stride);
+        std::vector<double> score(N);
+
+        for (int base = 1; base < N; ++base) {
+            int* row = &inst.shaw_order[static_cast<size_t>(base) * stride];
+            int k = 0;
+            for (int t = 1; t < N; ++t) {
+                if (t == base) continue;
+                score[t] = shawRelatedness(inst, base, t);
+                row[k++] = t;
+            }
+            std::sort(row, row + stride, [&](int a, int b) {
+                if (score[a] != score[b]) return score[a] < score[b];
+                return a < b;
+            });
+        }
+    }
+
+    return &inst.shaw_order[static_cast<size_t>(base_client_id) * stride];
+}
+
+// Ranking completo, tal como se armaba en cada extraccion
+int shawByFullSort(const Solution& sol, int base_client_id, int chosen_idx) {
+    std::vector<RelatednessCandidate> candidates;
+    for (int r = 0; r < sol.routes.size(); ++r) {
+        const Route& route = sol.routes[r];
+        if (route.path.size() <= 2) continue;
+
+        for (int i = 1; i < route.path.size() - 1; ++i) {
+            int target_id = route.path[i];
+            candidates.push_back({r, i, target_id, shawRelatedness(sol.inst, base_client_id, target_id)});
+        }
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+        [](const RelatednessCandidate& a, const RelatednessCandidate& b) {
+            return a.relatedness < b.relatedness;
+        });
+
+    return candidates[chosen_idx].client_id;
+}
+
+} // namespace
+
 // Eliminamos clientes mas ineficientes
 void worstRemoval(Solution& sol, int q, double p){
     int N = sol.inst.clients.size();
     int removed = 0;
 
-    while (removed < q && sol.unassigned.size() < N - 1) {
-        std::vector<RemovalCandidate> candidates;
+    // Ranking de todos los clientes en ruta. Sacar un cliente solo cambia el
+    // ahorro de sus dos vecinos, asi que se actualiza en vez de rearmarse.
+    std::vector<int> route_of;
+    buildRouteOf(sol, route_of);
 
-        for (int r = 0; r < sol.routes.size(); ++r) {
-            Route& route = sol.routes[r];
-            if (route.path.size() <= 2) continue;
-
-            for (int i = 1; i < route.path.size() - 1; ++i) {
-                int prev = route.path[i-1];
-                int curr = route.path[i];
-                int next = route.path[i+1];
-
-                double cost = sol.inst.dist_mat[prev][curr] + sol.inst.dist_mat[curr][next] - sol.inst.dist_mat[prev][next];
-                candidates.push_back({r, i, cost});
-            }
+    std::vector<double> cost_of(N, 0.0);
+    std::vector<WorstEntry> ranking;
+    for (int r = 0; r < sol.routes.size(); ++r) {
+        const Route& route = sol.routes[r];
+        for (int i = 1; i < static_cast<int>(route.path.size()) - 1; ++i) {
+            cost_of[route.path[i]] = removalCost(sol.inst, route, i);
+            ranking.push_back({cost_of[route.path[i]], route.path[i]});
         }
+    }
+    std::sort(ranking.begin(), ranking.end(), worstBefore);
 
-        if (candidates.empty()) break;
+    auto eraseFromRanking = [&](int client_id) {
+        WorstEntry key{cost_of[client_id], client_id};
+        ranking.erase(std::lower_bound(ranking.begin(), ranking.end(), key, worstBefore));
+    };
 
-        std::sort(candidates.begin(), candidates.end(),
-            [](const RemovalCandidate& a, const RemovalCandidate& b) {
-                return a.deviation_cost > b.deviation_cost;
-            });
-        
+    while (removed < q && sol.unassigned.size() < N - 1) {
+        if (ranking.empty()) break;
+
         std::uniform_real_distribution<double> distr(0.0, 1.0);
         double y = distr(rng);
 
-        int chosen_idx = static_cast<int>(std::pow(y,p) * candidates.size());
-        if (chosen_idx >= candidates.size())
-            chosen_idx = candidates.size() - 1;
-        
-        RemovalCandidate chosen = candidates[chosen_idx];
-        Route& target_route = sol.routes[chosen.route_idx];
+        int chosen_idx = static_cast<int>(std::pow(y,p) * ranking.size());
+        if (chosen_idx >= ranking.size())
+            chosen_idx = ranking.size() - 1;
 
-        sol.unassigned.push_back(target_route.path[chosen.node_idx]);
-        target_route.path.erase(target_route.path.begin() + chosen.node_idx);
+        bool tie = (chosen_idx > 0 && ranking[chosen_idx - 1].cost == ranking[chosen_idx].cost) ||
+                   (chosen_idx + 1 < ranking.size() && ranking[chosen_idx + 1].cost == ranking[chosen_idx].cost);
+        int client_id = tie ? worstByFullSort(sol, chosen_idx) : ranking[chosen_idx].client_id;
+
+        Route& target_route = sol.routes[route_of[client_id]];
+        int node_idx = nodeIndexOf(target_route, client_id);
+
+        eraseFromRanking(client_id);
+        route_of[client_id] = -1;
+
+        sol.unassigned.push_back(client_id);
+        target_route.path.erase(target_route.path.begin() + node_idx);
         target_route.recalculate(sol.inst);
         removed++;
+
+        // Los vecinos del cliente extraido quedaron en node_idx - 1 y node_idx
+        for (int i : {node_idx - 1, node_idx}) {
+            int neighbor = target_route.path[i];
+            if (neighbor == 0) continue;
+
+            double new_cost = removalCost(sol.inst, target_route, i);
+            if (new_cost == cost_of[neighbor]) continue;
+
+            eraseFromRanking(neighbor);
+            cost_of[neighbor] = new_cost;
+            WorstEntry entry{new_cost, neighbor};
+            ranking.insert(std::lower_bound(ranking.begin(), ranking.end(), entry, worstBefore), entry);
+        }
     }
 
     sol.updateMetrics();
@@ -114,10 +269,6 @@ void worstRemoval(Solution& sol, int q, double p){
 
 // Eliminamos clientes mas parecidos
 void shawRemoval(Solution& sol, int q, double p){
-    const double w_dist = 9.0;
-    const double w_time = 3.0;
-    const double w_demand = 2.0;
-
     int N = sol.inst.clients.size();
     int removed = 0;
     std::vector<int> removed_clients;
@@ -126,7 +277,7 @@ void shawRemoval(Solution& sol, int q, double p){
     for (int i = 0; i < sol.routes.size(); ++i)
         if (sol.routes[i].path.size() > 2)
             active_routes.push_back(i);
-    
+
     if (active_routes.empty()) return;
 
     std::uniform_int_distribution<int> r_distr(0, active_routes.size() - 1);
@@ -143,55 +294,60 @@ void shawRemoval(Solution& sol, int q, double p){
     first_route.recalculate(sol.inst);
     removed++;
 
+    std::vector<int> route_of;
+    int routed = buildRouteOf(sol, route_of);
+    int stride = N - 2;
+
     while (removed < q && sol.unassigned.size() < N - 1) {
         std::uniform_int_distribution<int> base_distr(0, removed_clients.size() - 1);
         int base_client_id = removed_clients[base_distr(rng)];
-        const Client& base_client = sol.inst.clients[base_client_id];
 
-        std::vector<RelatednessCandidate> candidates;
-        for (int r = 0; r < sol.routes.size(); ++r) {
-            Route& route = sol.routes[r];
-            if (route.path.size() <= 2) continue;
+        if (routed == 0) break;
 
-            for (int i = 1; i < route.path.size() - 1; ++i) {
-                int target_id = route.path[i];
-                const Client& target_client = sol.inst.clients[target_id];
-
-                double r_score = 
-                    (w_dist * sol.inst.dist_mat[base_client_id][target_id]) +
-                    (w_time * std::abs(base_client.ready_time - target_client.ready_time)) +
-                    (w_demand * std::abs(base_client.demand - target_client.demand));
-                
-                candidates.push_back({r, i, target_id, r_score});
-            }
-        }
-
-        if (candidates.empty()) break;
-
-        std::sort(candidates.begin(), candidates.end(),
-            [](const RelatednessCandidate& a, const RelatednessCandidate& b) {
-                return a.relatedness < b.relatedness;
-            });
-        
         std::uniform_real_distribution<double> y_distr(0.0, 1.0);
         double y = y_distr(rng);
 
-        int chosen_idx = static_cast<int>(std::pow(y, p) * candidates.size());
-        if (chosen_idx >= candidates.size())
-            chosen_idx = candidates.size() - 1;
-        
-        RelatednessCandidate chosen = candidates[chosen_idx];
-        Route& target_route = sol.routes[chosen.route_idx];
+        int chosen_idx = static_cast<int>(std::pow(y, p) * routed);
+        if (chosen_idx >= routed)
+            chosen_idx = routed - 1;
 
-        removed_clients.push_back(chosen.client_id);
-        sol.unassigned.push_back(chosen.client_id);
-        target_route.path.erase(target_route.path.begin() + chosen.node_idx);
+        // Se recorre el ranking fijo del cliente base salteando a los que ya
+        // no estan en ruta, hasta el puesto elegido (y uno mas, para detectar
+        // empates).
+        const int* order = shawOrderOf(sol.inst, base_client_id);
+        int prev_id = -1, client_id = -1, next_id = -1;
+        int rank = 0;
+        for (int k = 0; k < stride && next_id == -1; ++k) {
+            int t = order[k];
+            if (route_of[t] == -1) continue;
+
+            if (rank == chosen_idx - 1) prev_id = t;
+            else if (rank == chosen_idx) client_id = t;
+            else if (rank == chosen_idx + 1) next_id = t;
+            rank++;
+        }
+
+        double chosen_score = shawRelatedness(sol.inst, base_client_id, client_id);
+        bool tie = (prev_id != -1 && shawRelatedness(sol.inst, base_client_id, prev_id) == chosen_score) ||
+                   (next_id != -1 && shawRelatedness(sol.inst, base_client_id, next_id) == chosen_score);
+        if (tie) client_id = shawByFullSort(sol, base_client_id, chosen_idx);
+
+        Route& target_route = sol.routes[route_of[client_id]];
+        int node_idx = nodeIndexOf(target_route, client_id);
+
+        removed_clients.push_back(client_id);
+        sol.unassigned.push_back(client_id);
+        target_route.path.erase(target_route.path.begin() + node_idx);
         target_route.recalculate(sol.inst);
+        route_of[client_id] = -1;
+        routed--;
         removed++;
     }
 
     sol.updateMetrics();
-}// Operador destruir la ruta mas pequenia
+}
+
+// Operador destruir la ruta mas pequenia
 void removeSmallestRoute(Solution& sol) {
     if (sol.routes.empty()) return;
 
