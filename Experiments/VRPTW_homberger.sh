@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=vrptw_gh600
+#SBATCH --job-name=vrptw_gh800
 #SBATCH --partition=standard       # Partición de nodos CPU
 #SBATCH --nodes=1                  # 1 nodo para memoria compartida en Python
 #SBATCH --ntasks=1                 # 1 proceso principal
@@ -25,8 +25,8 @@ echo "============================================================"
 
 # 3. Lanzar la campaña
 python3 automate.py \
-    --size 600 \
+    --size 800 \
     --workers $SLURM_CPUS_PER_TASK \
     --runs 10
 
-echo "Campaña para size=600 finalizada."
+echo "Campaña para size=800 finalizada."
