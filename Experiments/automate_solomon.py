@@ -9,6 +9,7 @@ master_solomon_checkpoints.csv). El resumen lo arma analyze_results_solomon.py.
 """
 import os
 import re
+import csv
 import glob
 import time
 import zlib
@@ -16,10 +17,10 @@ import argparse
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from automate import (EXEC_PATH, MASTER_FIELDS, CHECKPOINT_FIELDS, CHECKPOINT_RE,
-                      parse_result_line, cargar_hechas, abrir_csv)
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_build_dir = os.path.join(BASE_DIR, "..", "build")
+EXEC_PATH = os.path.join(_build_dir, "ALNS_VRPTW" if os.name != "nt" else "ALNS_VRPTW.exe")
+
 BENCHMARK_DIR = os.path.join(BASE_DIR, "..", "solomon-100")
 MASTER = os.path.join(BASE_DIR, "results", "solomon", "master_solomon.csv")
 
@@ -29,6 +30,46 @@ RUNS = 10
 MAX_WORKERS = os.cpu_count() or 4
 CHECKPOINT_EVERY = 5000
 BASE_SEED = 12345
+
+MASTER_FIELDS = ["instance", "size", "class", "algorithm", "seed", "run",
+                 "best_veh", "best_dist", "cpu_time", "valid"]
+CHECKPOINT_FIELDS = ["instance", "size", "class", "algorithm", "seed", "run",
+                     "iter", "veh", "dist"]
+RESULT_RE = re.compile(r"^RESULT;(.*)$", re.MULTILINE)
+CHECKPOINT_RE = re.compile(r"\[CHECKPOINT\] (\d+) (\d+) ([\d.eE+-]+)")
+
+
+def parse_result_line(stdout):
+    matches = RESULT_RE.findall(stdout)
+    if not matches:
+        return None
+    fields = {}
+    for kv in matches[-1].split(";"):
+        if "=" in kv:
+            k, v = kv.split("=", 1)
+            fields[k] = v
+    return fields
+
+
+def cargar_hechas(master_path):
+    hechas = set()
+    if not os.path.exists(master_path):
+        return hechas
+    with open(master_path, newline="") as f:
+        for row in csv.DictReader(f):
+            hechas.add((row["instance"].strip().lower(), row["algorithm"], str(row["run"])))
+    return hechas
+
+
+def abrir_csv(path, fields, resume):
+    nuevo = not resume or not os.path.exists(path) or os.path.getsize(path) == 0
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    f = open(path, "w" if nuevo else "a", newline="")
+    writer = csv.DictWriter(f, fieldnames=fields)
+    if nuevo:
+        writer.writeheader()
+        f.flush()
+    return f, writer
 
 
 def semilla(inst_name, run, base_seed=BASE_SEED):
@@ -111,7 +152,6 @@ def main():
     modo = "RESUME: agrega a lo existente" if args.resume else "SOBRESCRIBE"
     print(f"=== Maestro: {args.master} ({modo}, se guarda corrida a corrida) ===")
 
-    # Solo el hilo principal escribe: cada corrida se guarda al terminar.
     f, writer = abrir_csv(args.master, MASTER_FIELDS, args.resume)
     fc, writer_c = (None, None)
     ckpt_path = args.master.replace(".csv", "_checkpoints.csv")

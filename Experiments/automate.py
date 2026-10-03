@@ -20,7 +20,8 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-EXEC_PATH = os.path.join(BASE_DIR, "..", "build", "ALNS_VRPTW.exe")
+_build_dir = os.path.join(BASE_DIR, "..", "build")
+EXEC_PATH = os.path.join(_build_dir, "ALNS_VRPTW" if os.name != "nt" else "ALNS_VRPTW.exe")
 
 CLASES = ["C1", "C2", "R1", "R2", "RC1", "RC2"]
 INDICES = range(1, 11)
@@ -151,9 +152,6 @@ def run_campaign(args):
         print("Revisa --benchmark y la estructura de carpetas. Abortando.")
         return
 
-    # Solo el hilo principal escribe los CSV (en el orden en que terminan las
-    # corridas), asi que no hace falta un lock. Cada fila se hace flush de
-    # inmediato: si se corta la campana, relanzar el mismo comando retoma.
     f, writer = abrir_csv(args.master, MASTER_FIELDS, args.resume)
     fc, writer_c = (None, None)
     ckpt_path = args.master.replace(".csv", "_checkpoints.csv")
