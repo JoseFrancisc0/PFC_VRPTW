@@ -1,6 +1,5 @@
 #include "solution.h"
 
-// Para imprimir soluciones
 std::ostream& operator<<(std::ostream& os, const Solution& s){
     os << "Vehiculos usados: " << s.used_vehicles << "  - Distancia total: " << s.total_distance << "\n";
 
@@ -20,15 +19,6 @@ std::ostream& operator<<(std::ostream& os, const Solution& s){
     return os;
 }
 
-// Comparador de soluciones (jerarquia de objetivos)
-bool Solution::operator<(const Solution& other) const {
-    if (this->used_vehicles < other.used_vehicles) return true;
-    if (this->used_vehicles > other.used_vehicles) return false;
-
-    return this->total_distance < other.total_distance;
-}
-
-// Operador copia para soluciones
 Solution& Solution::operator=(const Solution& other) {
     if (this == &other) return *this;
 
@@ -40,22 +30,18 @@ Solution& Solution::operator=(const Solution& other) {
     return *this;
 }
 
-// Actualizar metricas objetivo
 void Solution::updateMetrics() {
     used_vehicles = 0;
     total_distance = 0.0;
-    total_lateness = 0.0;
 
     for (const Route& route: routes) {
         if (route.path.size() > 2) {
             used_vehicles++;
             total_distance += route.distance;
-            total_lateness += route.lateness;
         }
     }
 }
 
-// Generar solucion inicial (NN-Based)
 void Solution::generateInitialSolution() {
     int N = inst.clients.size();
     std::vector<bool> visited(N, false);
@@ -132,17 +118,7 @@ void Solution::generateInitialSolution() {
     updateMetrics();
 }
 
-// Calcular costos de solucion (Fase 2)
 double cost(const Solution& sol) {
     const double VEHICLE_COST = 10000.0;
     return (sol.used_vehicles * VEHICLE_COST) + sol.total_distance;
-}
-
-// Calcular costos de solucion en la Fase 1 (Penaliza lateness y clientes sin asignar)
-double cost_phase1(const Solution& sol) {
-    const double VEHICLE_COST = 100000.0; // Aumentado a 100k para asegurar dominancia
-    const double LATENESS_PENALTY = 10.0;  // Reducido a 10
-    const double UNASSIGNED_PENALTY = 500000.0;
-    return (sol.used_vehicles * VEHICLE_COST) + sol.total_distance + 
-           (sol.total_lateness * LATENESS_PENALTY) + (sol.unassigned.size() * UNASSIGNED_PENALTY);
 }

@@ -32,10 +32,7 @@ MAX_WORKERS = os.cpu_count() or 4
 
 MASTER_FIELDS = ["instance", "size", "class", "algorithm", "seed", "run",
                  "best_veh", "best_dist", "cpu_time", "valid"]
-CHECKPOINT_FIELDS = ["instance", "size", "class", "algorithm", "seed", "run",
-                     "iter", "veh", "dist"]
 RESULT_RE = re.compile(r"^RESULT;(.*)$", re.MULTILINE)
-CHECKPOINT_RE = re.compile(r"\[CHECKPOINT\] (\d+) (\d+) ([\d.eE+-]+)")
 
 
 def semilla(run):
@@ -83,31 +80,26 @@ def abrir_csv(path, fields, resume):
     return f, writer
 
 
-def ejecutar_corrida(job, iters, params, checkpoint_every):
+def ejecutar_corrida(job, iters, params):
     full_path, inst_name, size, cls, algo, run = job
     seed = semilla(run)
-    extra = list(params)
-    if checkpoint_every > 0:
-        extra.append(f"checkpoint_every={checkpoint_every}")
-    cmd = [EXEC_PATH, full_path, algo, str(iters), str(seed)] + extra
+    cmd = [EXEC_PATH, full_path, algo, str(iters), str(seed)] + list(params)
 
     base = {"instance": inst_name, "size": size, "class": cls,
             "algorithm": algo, "seed": seed, "run": run}
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, check=True)
     except subprocess.CalledProcessError as e:
-        return base, None, [], f"exit {e.returncode}: {e.stderr.strip()[-500:]}"
+        return base, None, f"exit {e.returncode}: {e.stderr.strip()[-500:]}"
 
     res = parse_result_line(r.stdout)
     if res is None:
-        return base, None, [], "sin linea RESULT en la salida"
+        return base, None, "sin linea RESULT en la salida"
 
     fila = dict(base)
     for k in ("best_veh", "best_dist", "cpu_time", "valid"):
         fila[k] = res.get(k, "")
-    checkpoints = [dict(base, iter=int(i), veh=int(v), dist=float(d))
-                   for i, v, d in CHECKPOINT_RE.findall(r.stdout)]
-    return base, fila, checkpoints, None
+    return base, fila, None
 
 
 def run_campaign(args):
@@ -153,21 +145,15 @@ def run_campaign(args):
         return
 
     f, writer = abrir_csv(args.master, MASTER_FIELDS, args.resume)
-    fc, writer_c = (None, None)
-    ckpt_path = args.master.replace(".csv", "_checkpoints.csv")
-    if args.checkpoint_every > 0:
-        fc, writer_c = abrir_csv(ckpt_path, CHECKPOINT_FIELDS, args.resume)
-    elif not args.resume and os.path.exists(ckpt_path):
-        os.remove(ckpt_path)  # no dejar convergencias de una campana anterior
     hecho = base_hechas = len(hechas)
     errores = 0
     t0 = time.time()
     executor = ThreadPoolExecutor(max_workers=args.workers)
     try:
-        futuros = [executor.submit(ejecutar_corrida, j, args.iters, args.params, args.checkpoint_every)
+        futuros = [executor.submit(ejecutar_corrida, j, args.iters, args.params)
                    for j in jobs]
         for futuro in as_completed(futuros):
-            base, fila, checkpoints, error = futuro.result()
+            base, fila, error = futuro.result()
             tag = f"{base['algorithm']} {base['instance']} run{base['run']}"
             if error:
                 errores += 1
@@ -175,9 +161,6 @@ def run_campaign(args):
                 continue
             writer.writerow(fila)
             f.flush()
-            if writer_c:
-                writer_c.writerows(checkpoints)
-                fc.flush()
             hecho += 1
             print(f"[{hecho}/{total}] {tag} -> veh={fila['best_veh']} dist={fila['best_dist']} "
                   f"cpu={fila['cpu_time']}s valid={fila['valid']}")
@@ -188,8 +171,6 @@ def run_campaign(args):
     finally:
         executor.shutdown(wait=True)
         f.close()
-        if fc:
-            fc.close()
 
     dt = time.time() - t0
     h, rem = divmod(dt, 3600); m, s = divmod(rem, 60)
@@ -211,7 +192,5 @@ if __name__ == "__main__":
     ap.add_argument("--workers", type=int, default=MAX_WORKERS,
                     help="corridas simultaneas (default: todos los hilos logicos)")
     ap.add_argument("--params", nargs="*", default=[], help="clave=valor, ver Utils/params.h")
-    ap.add_argument("--checkpoint-every", type=int, default=0,
-                    help="si > 0, guarda la convergencia en <master>_checkpoints.csv")
     ap.add_argument("--dry-run", action="store_true", help="muestra que se correria, sin ejecutar")
     run_campaign(ap.parse_args())

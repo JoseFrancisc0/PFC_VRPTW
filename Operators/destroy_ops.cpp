@@ -1,6 +1,5 @@
 #include "operators.h"
 
-/// Quitamos clientes aleatorios de rutas
 void randomRemoval(Solution& sol, int q){
     int N = sol.inst.clients.size();
     int removed = 0;
@@ -32,7 +31,6 @@ void randomRemoval(Solution& sol, int q){
     sol.updateMetrics();
 }
 
-// Eliminamos rutas aleatorias
 void routeRemoval(Solution& sol, int q){
     int N = sol.inst.clients.size();
     int removed = 0;
@@ -64,18 +62,24 @@ void routeRemoval(Solution& sol, int q){
     sol.updateMetrics();
 }
 
-// worstRemoval y shawRemoval eligen, en cada extraccion, el candidato que
-// ocupa un cierto puesto en el ranking de todos los clientes en ruta. Rearmar
-// y ordenar ese ranking por cada cliente extraido es lo caro; las dos
-// versiones de abajo lo mantienen de forma incremental y llegan al mismo
-// candidato. Solo queda una ambiguedad posible: si el puesto elegido empata en
-// puntaje con un vecino del ranking, quien queda en ese puesto depende de como
-// std::sort resuelva el empate. En ese caso (raro) se recurre al ranking
-// completo original, de modo que la eleccion es identica siempre.
 namespace {
 
-// Ruta de cada cliente (-1 = no esta en ninguna ruta). Devuelve cuantos hay
-// en ruta.
+const double WORST_P = 3.0;
+const double SHAW_P = 3.0;
+
+struct RemovalCandidate {
+    int route_idx;
+    int node_idx;
+    double deviation_cost;
+};
+
+struct RelatednessCandidate {
+    int route_idx;
+    int node_idx;
+    int client_id;
+    double relatedness;
+};
+
 int buildRouteOf(const Solution& sol, std::vector<int>& route_of) {
     int routed = 0;
     route_of.assign(sol.inst.clients.size(), -1);
@@ -93,7 +97,6 @@ inline int nodeIndexOf(const Route& route, int client_id) {
     return std::find(route.path.begin() + 1, route.path.end() - 1, client_id) - route.path.begin();
 }
 
-// Ahorro de distancia al sacar al cliente de la posicion i de su ruta
 inline double removalCost(const Instance& inst, const Route& route, int i) {
     int prev = route.path[i-1];
     int curr = route.path[i];
@@ -101,7 +104,6 @@ inline double removalCost(const Instance& inst, const Route& route, int i) {
     return inst.dist_mat[prev][curr] + inst.dist_mat[curr][next] - inst.dist_mat[prev][next];
 }
 
-// Ranking de worstRemoval: mayor ahorro primero
 struct WorstEntry {
     double cost;
     int client_id;
@@ -112,7 +114,6 @@ inline bool worstBefore(const WorstEntry& a, const WorstEntry& b) {
     return a.client_id < b.client_id;
 }
 
-// Ranking completo, tal como se armaba en cada extraccion
 int worstByFullSort(const Solution& sol, int chosen_idx) {
     std::vector<RemovalCandidate> candidates;
 
@@ -146,9 +147,6 @@ inline double shawRelatedness(const Instance& inst, int base_client_id, int targ
            (SHAW_W_DEMAND * std::abs(base_client.demand - target_client.demand));
 }
 
-// La relacion entre dos clientes solo depende de datos de la instancia, asi
-// que el ranking de cada cliente contra todos los demas se arma una sola vez.
-// Fila del cliente c: los otros clientes, del mas al menos parecido.
 const int* shawOrderOf(const Instance& inst, int base_client_id) {
     int N = inst.clients.size();
     int stride = N - 2;
@@ -175,7 +173,6 @@ const int* shawOrderOf(const Instance& inst, int base_client_id) {
     return &inst.shaw_order[static_cast<size_t>(base_client_id) * stride];
 }
 
-// Ranking completo, tal como se armaba en cada extraccion
 int shawByFullSort(const Solution& sol, int base_client_id, int chosen_idx) {
     std::vector<RelatednessCandidate> candidates;
     for (int r = 0; r < sol.routes.size(); ++r) {
@@ -196,15 +193,12 @@ int shawByFullSort(const Solution& sol, int base_client_id, int chosen_idx) {
     return candidates[chosen_idx].client_id;
 }
 
-} // namespace
+} 
 
-// Eliminamos clientes mas ineficientes
-void worstRemoval(Solution& sol, int q, double p){
+void worstRemoval(Solution& sol, int q){
     int N = sol.inst.clients.size();
     int removed = 0;
 
-    // Ranking de todos los clientes en ruta. Sacar un cliente solo cambia el
-    // ahorro de sus dos vecinos, asi que se actualiza en vez de rearmarse.
     std::vector<int> route_of;
     buildRouteOf(sol, route_of);
 
@@ -230,7 +224,7 @@ void worstRemoval(Solution& sol, int q, double p){
         std::uniform_real_distribution<double> distr(0.0, 1.0);
         double y = distr(rng);
 
-        int chosen_idx = static_cast<int>(std::pow(y,p) * ranking.size());
+        int chosen_idx = static_cast<int>(std::pow(y, WORST_P) * ranking.size());
         if (chosen_idx >= ranking.size())
             chosen_idx = ranking.size() - 1;
 
@@ -249,7 +243,6 @@ void worstRemoval(Solution& sol, int q, double p){
         target_route.recalculate(sol.inst);
         removed++;
 
-        // Los vecinos del cliente extraido quedaron en node_idx - 1 y node_idx
         for (int i : {node_idx - 1, node_idx}) {
             int neighbor = target_route.path[i];
             if (neighbor == 0) continue;
@@ -267,8 +260,7 @@ void worstRemoval(Solution& sol, int q, double p){
     sol.updateMetrics();
 }
 
-// Eliminamos clientes mas parecidos
-void shawRemoval(Solution& sol, int q, double p){
+void shawRemoval(Solution& sol, int q){
     int N = sol.inst.clients.size();
     int removed = 0;
     std::vector<int> removed_clients;
@@ -307,13 +299,10 @@ void shawRemoval(Solution& sol, int q, double p){
         std::uniform_real_distribution<double> y_distr(0.0, 1.0);
         double y = y_distr(rng);
 
-        int chosen_idx = static_cast<int>(std::pow(y, p) * routed);
+        int chosen_idx = static_cast<int>(std::pow(y, SHAW_P) * routed);
         if (chosen_idx >= routed)
             chosen_idx = routed - 1;
 
-        // Se recorre el ranking fijo del cliente base salteando a los que ya
-        // no estan en ruta, hasta el puesto elegido (y uno mas, para detectar
-        // empates).
         const int* order = shawOrderOf(sol.inst, base_client_id);
         int prev_id = -1, client_id = -1, next_id = -1;
         int rank = 0;
@@ -347,9 +336,9 @@ void shawRemoval(Solution& sol, int q, double p){
     sol.updateMetrics();
 }
 
-// Operador destruir la ruta mas pequenia
-void removeSmallestRoute(Solution& sol) {
-    if (sol.routes.empty()) return;
+void smallestRouteElimination(Solution& sol, RepairOp repair) {
+    const int EJECTION_BUDGET = 10;
+    const int EJECTION_SHAKE = 3;
 
     int smallest_idx = -1;
     size_t min_size = std::numeric_limits<size_t>::max();
@@ -369,6 +358,19 @@ void removeSmallestRoute(Solution& sol) {
         sol.routes.erase(sol.routes.begin() + smallest_idx);
     }
     sol.updateMetrics();
+
+    Solution attempt = sol;
+    repair(attempt, false);
+
+    for (int k = 0; !attempt.unassigned.empty() && k < EJECTION_BUDGET; ++k) {
+        randomRemoval(attempt, EJECTION_SHAKE);
+        repair(attempt, false);
+    }
+
+    if (attempt.unassigned.empty())
+        sol = attempt;
+    else
+        repair(sol, true);
 }
 
 void timeWindowRemoval(Solution& sol, int q) {
@@ -397,8 +399,7 @@ void timeWindowRemoval(Solution& sol, int q) {
     });
     
     int to_remove = std::min(q, static_cast<int>(candidates.size()));
-    
-    // Sort in reverse order of route and index to delete from end safely
+
     std::vector<TW_Candidate> to_delete(candidates.begin(), candidates.begin() + to_remove);
     std::sort(to_delete.begin(), to_delete.end(), [](const TW_Candidate& a, const TW_Candidate& b) {
         if (a.route_idx != b.route_idx) return a.route_idx > b.route_idx;

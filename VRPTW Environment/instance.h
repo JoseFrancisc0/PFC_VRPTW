@@ -10,7 +10,6 @@
 
 extern std::mt19937 rng;
 
-// Struct del cliente
 struct Client {
     int id;
     double x;
@@ -26,14 +25,11 @@ struct Client {
 
 class Instance;
 
-// Struct de ruta / vehiculo
 struct Route {
     std::vector<int> path;
     double load = 0.0;
     double distance = 0.0;
-    double lateness = 0.0;
 
-    // Para evaluaciones O(1)
     std::vector<double> arrival_times;
     std::vector<double> wait_times;
     std::vector<double> time_slacks;
@@ -50,7 +46,6 @@ struct Route {
     void recalculate(const Instance& inst);
 };
 
-// Clase de la instancia
 class Instance {
     public:
         int num_vehicles;
@@ -59,8 +54,6 @@ class Instance {
         std::vector<std::vector<double>> dist_mat;
         std::vector<std::vector<bool>> is_reachable;
 
-        // Ranking de clientes por parecido que usa shawRemoval. Se arma en su
-        // primer uso (ver shawOrderOf en Operators/destroy_ops.cpp).
         mutable std::vector<int> shaw_order;
 
         Instance(const std::string& path) {

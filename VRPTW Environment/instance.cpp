@@ -1,10 +1,8 @@
 #include "instance.h"
 
-// Recalcular costos de ruta usando Forward Slack Times
 void Route::recalculate(const Instance& inst) {
     load = 0.0;
     distance = 0.0;
-    lateness = 0.0;
     int L = path.size();
 
     arrival_times.resize(L, 0.0);
@@ -25,12 +23,7 @@ void Route::recalculate(const Instance& inst) {
             load += inst.clients[curr].demand;
 
         double start_service = std::max(current_time, inst.clients[curr].ready_time);
-        
-        if (start_service > inst.clients[curr].due_date) {
-            lateness += (start_service - inst.clients[curr].due_date);
-        }
-
-        double arrival_at_next= start_service + inst.clients[curr].service_time + inst.dist_mat[curr][next];
+        double arrival_at_next = start_service + inst.clients[curr].service_time + inst.dist_mat[curr][next];
 
         arrival_times[i + 1] = arrival_at_next;
         wait_times[i + 1] = std::max(0.0, inst.clients[next].ready_time - arrival_at_next);
@@ -39,11 +32,6 @@ void Route::recalculate(const Instance& inst) {
 
     int last = path[L - 1];
     double start_service_last = std::max(arrival_times[L - 1], inst.clients[last].ready_time);
-    
-    if (start_service_last > inst.clients[last].due_date) {
-        lateness += (start_service_last - inst.clients[last].due_date);
-    }
-    
     time_slacks[L - 1] = inst.clients[last].due_date - start_service_last;
 
     for (int i = L - 2; i >= 0; --i) {
@@ -55,7 +43,6 @@ void Route::recalculate(const Instance& inst) {
     }
 }   
 
-// Cargar instancia desde el benchmark de Solomon
 void Instance::loadSolomon(const std::string& path) {
     std::ifstream file(path);
 
@@ -83,7 +70,6 @@ void Instance::loadSolomon(const std::string& path) {
     
 }
 
-// Precomputar distancias
 void Instance::precomputeDistances() {
     int N = clients.size();
     for (int i = 0; i < N; ++i) {
@@ -99,7 +85,6 @@ void Instance::precomputeDistances() {
     }
 }
 
-// Precomputar rutas validas
 void Instance::precomputeFeasibility() {
     int N = clients.size();
     for (int i = 0; i < N; ++i) {

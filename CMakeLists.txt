@@ -5,9 +5,11 @@ add_executable(ALNS_VRPTW
                main.cpp 
                "VRPTW Environment/instance.cpp"
                "VRPTW Environment/solution.cpp"
-               Operators/destroy_ops.cpp 
+               Operators/operators.cpp
+               Operators/destroy_ops.cpp
                Operators/repair_ops.cpp 
-               ALNS/alns.cpp 
+               ALNS/alns.cpp
+               ALNS/alns_classic.cpp
                ALNS/alns_qlearning.cpp
                Utils/utils.cpp)
 
