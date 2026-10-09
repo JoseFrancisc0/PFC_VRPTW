@@ -1,0 +1,316 @@
+\section{Bucle de búsqueda común}
+\label{sec:base}
+
+La búsqueda adaptativa en vecindarios grandes (ALNS)~\cite{ropke2006,pisinger2007} mejora una
+solución destruyéndola parcialmente y reparándola en cada iteración. El
+Algoritmo~\ref{alg:alns} reproduce el método \cod{ALNS::solve}, común a los dos métodos de la
+tesis. Las llamadas \fn{Seleccionar} y \fn{Aprender} son los dos únicos puntos de variación
+(Secciones~\ref{sec:clasico} y~\ref{sec:ql}).
+
+La búsqueda se organiza en \emph{dos fases}, siguiendo el esquema de Ropke y
+Pisinger~\cite{ropke2006}: la fase~1 minimiza el número de rutas y la fase~2 minimiza la
+distancia con la flota obtenida. Ambas ejecutan exactamente el mismo cuerpo de iteración; lo
+que cambia es la solución de la que se parte y las condiciones de corte
+(Sección~\ref{sec:fases}). En el pseudocódigo, $\bar{x}$ denota la última solución completa
+conocida y $T_{\mathrm{fin}}$ la última iteración, que se fija al comenzar la fase~2.
+
+\begin{algorithm}[H]
+\caption{Bucle ALNS común en dos fases (\cod{ALNS::solve})}
+\label{alg:alns}
+\Entrada{solución inicial $x_0$, presupuesto de iteraciones $T_{\max}$}
+\Salida{mejor solución encontrada $\xbest$}
+$\bar{x}\gets x_0$;\quad $\textit{fase1}\gets\text{verdadero}$;\quad $T_{\mathrm{fin}}\gets 2\,T_{\max}$\;
+$T_0\gets -\,w\,D(x_0)/\ln 0.5$;\quad $K_{\min}\gets\bigl\lceil\sum_{i}\mu_i/Q\bigr\rceil$\;
+\fn{IniciarEtapa}($0$) \Com*[r]{Algoritmo~\ref{alg:etapa}: fija $x$, $\xbest$, $T$ y los contadores}
+$t\gets 1$\;
+\Mientras{$t\le T_{\mathrm{fin}}$}{
+  $x'\gets x$ \Com*[r]{copia de trabajo}
+  $(j,k)\gets$ \fn{Seleccionar}($t$) \Com*[r]{destrucción $j$, reparación $k$}
+  \fn{AplicarOperadores}($x'$, $j$, $k$) \Com*[r]{Algoritmo~\ref{alg:aplicar}}
+  $b_{\mathrm{ant}}\gets|\Uns(\xbest)|$\;
+  $o.\gbest\gets G(\xbest,x')$;\quad $o.\gcur\gets G(x,x')$ \Com*[r]{ganancias relativas, ec.~\eqref{eq:ganancia}}
+  $o.\textit{nuevoMejor}\gets f(x')<f(\xbest)$\;
+  $o.\textit{mejoró}\gets o.\textit{nuevoMejor}\ \vee\ f(x')<f(x)$\;
+  $o.\textit{aceptado}\gets o.\textit{mejoró}\ \vee\ $\fn{Aceptar}($f(x')$, $f(x)$, $T$)\;
+  \lSi{$o.\textit{aceptado}$}{$x\gets x'$}
+  \lSi{$o.\textit{nuevoMejor}$}{$\xbest\gets x'$}
+  $\textit{estanc}\gets 0$ si $o.\textit{nuevoMejor}$; si no, $\textit{estanc}+1$\;
+  \Si(\Com*[f]{reinicio por estancamiento}){$\textit{estanc}\ge L_{\mathrm{est}}$}{
+    $x\gets\xbest$;\quad $T\gets\rho\,T_0$;\quad $\textit{estanc}\gets 0$\;
+  }
+  \fn{Aprender}($t$, $o$)\;
+  $T\gets c\,T$ \Com*[r]{enfriamiento geométrico}
+  \Si(\Com*[f]{control de la fase de rutas}){$\textit{fase1}$}{
+    $b\gets|\Uns(\xbest)|$\;
+    $\textit{sinBanco}\gets 0$ si $b<b_{\mathrm{ant}}$; si no, $\textit{sinBanco}+1$\;
+    \uSi(\Com*[f]{ruta eliminada: se intenta con la siguiente}){$b=0$}{
+      $\bar{x}\gets\xbest$;\quad \fn{IniciarEtapa}($t$)\;
+    }
+    \SiNoSi(\Com*[f]{se abandona el intento}){$t\ge T_{\max}$ \O $(b\ge B$ \Y $\textit{sinBanco}\ge L_{\mathrm{rut}})$}{
+      $\textit{fase1}\gets\text{falso}$;\quad \fn{IniciarEtapa}($t$)\;
+    }
+  }
+  $t\gets t+1$\;
+}
+\Devolver $\xbest$\;
+\end{algorithm}
+
+\begin{algorithm}[H]
+\caption{\fn{IniciarEtapa} (función local \cod{startStage} de \cod{ALNS::solve})}
+\label{alg:etapa}
+\Entrada{iteración $t$ en la que comienza la etapa}
+$\textit{fase1}\gets\textit{fase1}\ \wedge\ t<T_{\max}\ \wedge\ K(\bar{x})>K_{\min}$\;
+\Si(\Com*[f]{comienza la fase 2}){$\neg\,\textit{fase1}$}{
+  $T_{\mathrm{fin}}\gets t+T_{\max}$\;
+  \fn{AlIniciarFase2}($t$) \Com*[r]{aviso a la subclase (\cod{onDistancePhase})}
+}
+$x\gets\bar{x}$\;
+\Si(\Com*[f]{fase 1: una ruta menos}){$\textit{fase1}$}{
+  eliminar de $\Rset(x)$ las rutas vacías\;
+  $\pi\gets$ ruta de $x$ con menos clientes\;
+  mover todos los clientes de $\pi$ a $\Uns(x)$;\quad eliminar $\pi$ de $\Rset(x)$\;
+}
+$\xbest\gets x$;\quad $T\gets T_0$;\quad $\textit{estanc}\gets 0$;\quad $\textit{sinBanco}\gets 0$\;
+\end{algorithm}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Constantes del bucle común (\cod{alns.cpp}, \cod{operators.cpp}, \cod{solution.cpp}).}
+\label{tab:const-base}
+\begin{tabularx}{\textwidth}{@{}l c c L@{}}
+\toprule
+Constante & Símbolo & Valor & Función \\
+\midrule
+\cod{UNASSIGNED\_COST} & -- & $10^6$ & Peso de un cliente sin asignar en $f$ \\
+\cod{VEHICLE\_COST} & -- & $10^4$ & Peso de un vehículo en $f$ \\
+\cod{TEMP\_SCALE} & $w$ & $0.2$ & Empeoramiento relativo aceptado con probabilidad $0.5$ en $T_0$ \\
+\cod{COOLING\_RATE} & $c$ & $0.9995$ & Factor de enfriamiento por iteración \\
+\cod{STAGNATION\_LIMIT} & $L_{\mathrm{est}}$ & $1500$ & Iteraciones sin nuevo mejor que disparan el reinicio \\
+\cod{REHEAT\_FACTOR} & $\rho$ & $0.5$ & Fracción de $T_0$ a la que se recalienta \\
+\cod{ROUTE\_PHASE\_BANK} & $B$ & $5$ & Clientes sin asignar a partir de los cuales puede abandonarse un intento de la fase~1 \\
+\cod{ROUTE\_PHASE\_STALL} & $L_{\mathrm{rut}}$ & $2000$ & Iteraciones sin reducir los clientes sin asignar que disparan ese abandono \\
+\cod{Q\_MIN\_RATIO} / \cod{Q\_MAX\_RATIO} & -- & $0.10$ / $0.40$ & Fracción mínima y máxima de clientes extraídos \\
+\cod{Q\_MIN\_CAP} / \cod{Q\_MAX\_CAP} & -- & $30$ / $60$ & Topes absolutos de esas dos cotas \\
+\cod{Q\_MIN\_FLOOR} & -- & $4$ & Cota inferior absoluta de $q$ \\
+\cod{NOISE\_PROB} & -- & $0.5$ & Probabilidad de que la reparación use costos con ruido \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Las dos fases de la búsqueda}
+\label{sec:fases}
+
+\paragraph{Flota fija.} Los operadores de reparación \emph{nunca abren rutas nuevas}: insertan
+los clientes pendientes en las rutas que ya existen en la solución y, si alguno no cabe en
+ninguna, lo dejan en $\Uns$ (Sección~\ref{sec:reparacion}). El número de rutas de una
+solución solo puede cambiar, por tanto, cuando el bucle común retira una de forma explícita.
+Esta es la diferencia de fondo con un ALNS de una sola fase, en el que la reparación abre
+rutas a demanda y la reducción de flota se confía a la función de costo: aquí la flota es un
+dato de cada etapa y la búsqueda debe encajar a todos los clientes en ella.
+
+\paragraph{Fase 1: minimización de rutas.} Se compone de una sucesión de \emph{etapas}. Cada
+etapa parte de la última solución completa $\bar{x}$, le quita la ruta con menos clientes y
+deja esos clientes sin asignar (Algoritmo~\ref{alg:etapa}). La lista $\Uns$ actúa como el
+\emph{banco de clientes} de~\cite{ropke2006}: los clientes pendientes viajan con la solución
+de una iteración a la siguiente y cada reparación intenta colocarlos junto con los $q$ recién
+extraídos. Como $f$ penaliza con $10^6$ cada cliente sin asignar, el ALNS ordinario, sin
+ninguna modificación, trabaja para vaciar el banco. La etapa termina de una de estas tres
+formas:
+\begin{itemize}
+\item \textbf{Éxito.} La mejor solución de la etapa queda completa ($|\Uns(\xbest)|=0$): se ha
+eliminado una ruta. Esa solución pasa a ser $\bar{x}$ y comienza otra etapa, con una ruta
+menos.
+\item \textbf{Abandono por estancamiento.} Quedan al menos $B=5$ clientes sin asignar en la
+mejor solución y han pasado $L_{\mathrm{rut}}=2000$ iteraciones sin que ese número disminuya.
+Es el criterio de corte de~\cite{ropke2006}: si el banco es grande y no se reduce, la ruta no
+es eliminable con un esfuerzo razonable. Con menos de $5$ clientes pendientes el intento no se
+abandona por esta vía y continúa hasta agotar el presupuesto.
+\item \textbf{Presupuesto agotado.} Se alcanza la iteración $T_{\max}$.
+\end{itemize}
+En los dos últimos casos el intento en curso se descarta y la fase~1 termina. También termina,
+sin iniciar una etapa nueva, cuando $\bar{x}$ alcanza la cota inferior trivial de vehículos
+\begin{equation}
+K_{\min}=\Bigl\lceil\frac{1}{Q}\sum_{i=1}^{n}\mu_i\Bigr\rceil ,
+\label{eq:kmin}
+\end{equation}
+ya que con menos rutas no hay capacidad para toda la demanda. Si la solución inicial ya cumple
+$K(x_0)=K_{\min}$, la fase~1 no se ejecuta.
+
+\paragraph{Fase 2: minimización de distancia.} Parte de $\bar{x}$, la solución completa con
+menos rutas que encontró la fase~1 (no del intento fallido), y ejecuta siempre $T_{\max}$
+iteraciones: si la fase~1 terminó en la iteración $t_1\le T_{\max}$, la búsqueda acaba en
+$T_{\mathrm{fin}}=t_1+T_{\max}$. La flota sigue fija, de modo que el número de vehículos no
+puede superar el número de rutas de $\bar{x}$; sí puede bajar si una destrucción vacía una
+ruta y la reparación no vuelve a usarla, lo que $f$ premia con $10^4$. Una candidata
+incompleta cuesta al menos $10^6$ más que la solución actual, por lo que en esta fase es
+rechazada en la práctica (Sección~\ref{sec:aceptacion}) y nunca es un nuevo mejor: la solución
+devuelta es completa.
+
+\paragraph{Reinicio de la búsqueda en cada etapa.} Al comenzar cada etapa de la fase~1, y al
+comenzar la fase~2, se restablecen $x$, $\xbest$, la temperatura ($T\gets T_0$) y los
+contadores de estancamiento. En cambio, el estado del mecanismo de selección (los pesos de
+las ruletas o la tabla $Q$) \emph{se conserva} entre etapas y entre fases; el único aviso que
+reciben las subclases es \fn{AlIniciarFase2}, que el método clásico ignora y el Q-learning
+aprovecha para volver a explorar (Sección~\ref{sec:ql-fase2}). Obsérvese que dentro de una
+etapa de la fase~1 $\xbest$ es la mejor solución \emph{de esa etapa}, normalmente incompleta;
+la mejor solución completa se guarda aparte en $\bar{x}$.
+
+\subsection{Ganancias relativas}
+\label{sec:ganancia}
+
+El resultado $o$ de cada iteración incluye dos ganancias, respecto de la mejor solución y de
+la actual, calculadas \emph{antes} de actualizar $x$ y $\xbest$. La ganancia de una candidata
+$x'$ sobre una referencia $y$ es la mejora relativa en el \emph{primer criterio en que
+difieren}, en el mismo orden que impone $f$ (\cod{relativeGain}):
+\begin{equation}
+G(y,x')=
+\begin{cases}
+\max\Bigl(0,\ \dfrac{|\Uns(y)|-|\Uns(x')|}{|\Uns(y)|}\Bigr) & \text{si } |\Uns(x')|\neq|\Uns(y)|,\\[10pt]
+\max\Bigl(0,\ \dfrac{K(y)-K(x')}{K(y)}\Bigr) & \text{si no, y } K(x')\neq K(y),\\[10pt]
+\max\Bigl(0,\ \dfrac{D(y)-D(x')}{D(y)}\Bigr) & \text{en otro caso.}
+\end{cases}
+\label{eq:ganancia}
+\end{equation}
+Cada mejora se expresa así en la escala de su propio criterio: colocar un cliente del banco
+vale $1/|\Uns|$, ahorrar un vehículo vale $1/K$ y una reducción de distancia vale
+$\Delta D/D$. Si la ganancia se midiera sobre $f$, las mejoras de distancia quedarían diluidas
+por los términos $10^{4}K$ y $10^{6}|\Uns|$, que no cambian. Una candidata que empeora el
+primer criterio en que difiere tiene ganancia $0$ aunque mejore los siguientes. Las ganancias
+solo las utiliza el Q-learning (Sección~\ref{sec:recompensa}); el método clásico usa
+únicamente las banderas de $o$.
+
+\subsection{Criterio de aceptación}
+\label{sec:aceptacion}
+
+Se usa el criterio de recocido simulado~\cite{kirkpatrick1983}. Una candidata que no empeora
+la solución actual se acepta siempre; una que la empeora en $\Delta=f(x')-f(x)>0$ se acepta
+con probabilidad
+\begin{equation}
+P(\text{aceptar})=\exp(-\Delta/T).
+\label{eq:sa}
+\end{equation}
+Obsérvese que una candidata de igual costo ($\Delta=0$) se acepta pero no se considera mejora,
+lo que permite desplazamientos laterales por mesetas de $f$ sin que cuenten como éxito para
+el mecanismo de aprendizaje.
+
+Las candidatas incompletas no reciben un tratamiento especial: se evalúan con $f$ como
+cualquier otra. En la fase~1 son la norma, y el orden que induce $f$ hace que la búsqueda
+prefiera, por este orden, menos clientes pendientes, menos vehículos y menos distancia. Dejar
+un cliente más sin asignar supone $\Delta\ge 10^{6}$ menos lo que se ahorre en los otros
+términos, y su probabilidad de aceptación es despreciable a las temperaturas de trabajo; en la
+práctica, el banco de la solución actual no crece. A igualdad de clientes pendientes, en
+cambio, el recocido acepta empeoramientos de distancia con normalidad, y es ese movimiento el
+que reordena las rutas hasta que los clientes del banco encuentran hueco.
+
+\subsection{Esquema de temperatura}
+
+\paragraph{Temperatura inicial.} $T_0$ se calibra una sola vez, respecto de la distancia de la
+solución inicial, de forma que un empeoramiento de $w\,D(x_0)$ se acepte con probabilidad
+$0.5$:
+\begin{equation}
+T_0=\frac{-\,w\,D(x_0)}{\ln 0.5}=\frac{0.2}{\ln 2}\,D(x_0)\approx 0.2885\,D(x_0).
+\label{eq:t0}
+\end{equation}
+Con esta definición, la probabilidad de aceptar un empeoramiento $\Delta$ a temperatura $T_0$
+es $2^{-\Delta/(w D(x_0))}$. Todas las etapas de la fase~1 y la fase~2 arrancan con esta misma
+$T_0$. Conviene notar que $T_0$ escala con la distancia de la instancia, mientras que las
+penalizaciones de~\eqref{eq:costo} son fijas: la probabilidad de aceptar a $T_0$ una solución
+con un vehículo adicional (reutilizando una ruta que había quedado vacía) es
+$2^{-5\cdot 10^{4}/D(x_0)}$, que es despreciable cuando $D(x_0)$ es del orden de unos pocos
+miles y deja de serlo cuando $D(x_0)$ es del orden de decenas de miles. La de aceptar un
+cliente más sin asignar es $2^{-5\cdot 10^{6}/D(x_0)}$, despreciable en todos los tamaños de
+instancia considerados.
+
+\paragraph{Enfriamiento.} Tras cada iteración $T\gets c\,T$ con $c=0.9995$. La temperatura
+se reduce a la mitad cada $\ln 0.5/\ln c\approx 1386$ iteraciones y, sin recalentamientos,
+al cabo de las $25\,000$ iteraciones de la fase~2 valdría
+$c^{25000}\,T_0\approx 3.7\cdot 10^{-6}\,T_0$, es decir, un descenso prácticamente puro.
+
+\paragraph{Reinicio por estancamiento.} Si transcurren $L_{\mathrm{est}}=1500$ iteraciones
+consecutivas sin un nuevo mejor, la búsqueda vuelve a la mejor solución conocida
+($x\gets\xbest$) y la temperatura se fija en $\rho\,T_0=0.5\,T_0$. El reinicio combina dos
+efectos: \emph{intensificación}, porque descarta la deriva acumulada y retoma el mejor punto
+conocido, y \emph{diversificación}, porque el recalentamiento vuelve a permitir empeoramientos.
+Una consecuencia cuantitativa es que, en un periodo prolongado de estancamiento, la
+temperatura oscila de forma periódica dentro del intervalo
+\[
+\bigl[\rho\,c^{L_{\mathrm{est}}}\,T_0,\ \rho\,T_0\bigr]\approx[\,0.236\,T_0,\ 0.5\,T_0\,],
+\]
+y nunca llega a congelarse. La temperatura solo desciende por debajo de esa banda mientras se
+sigan encontrando nuevos mejores con una separación menor que $L_{\mathrm{est}}$ iteraciones.
+El mecanismo actúa igual en las dos fases. En la fase~1, «nuevo mejor» es cualquier descenso
+de $f$ dentro de la etapa, incluidas las mejoras de distancia a igualdad de banco; por eso el
+abandono de un intento no se decide con este contador sino con uno propio
+($\textit{sinBanco}$), que solo atiende al número de clientes pendientes.
+
+El contador de estancamiento se actualiza \emph{antes} de \fn{Aprender}, pero el resultado $o$
+que recibe el mecanismo de aprendizaje es el de la iteración recién evaluada y no se ve
+alterado por el reinicio. Del mismo modo, el cambio de etapa o de fase se decide
+\emph{después} de \fn{Aprender}, de manera que la iteración que completa una solución en la
+fase~1 se aprende como cualquier otra.
+
+\subsection{Catálogo de operadores y grado de destrucción}
+\label{sec:catalogo}
+
+El Algoritmo~\ref{alg:aplicar} muestra cómo se aplica el par elegido. Hay $6$ operadores de
+destrucción y $5$ de reparación (Tabla~\ref{tab:catalogo}), es decir, $30$ pares posibles.
+
+\begin{algorithm}[H]
+\caption{\fn{AplicarOperadores} (\cod{applyOperators})}
+\label{alg:aplicar}
+\Entrada{solución $x'$, índice de destrucción $j\in\{0,\dots,5\}$, índice de reparación $k\in\{0,\dots,4\}$}
+$q_{\min}\gets\max\bigl(4,\ \min(30,\ \lfloor 0.10\,n\rfloor)\bigr)$\;
+$q_{\max}\gets\max\bigl(q_{\min}+1,\ \min(60,\ \lfloor 0.40\,n\rfloor)\bigr)$\;
+$q\sim\unifint{q_{\min}}{q_{\max}}$\;
+$\textit{des}_j(x', q)$\;
+$\textit{ruido}\gets$ verdadero con probabilidad $0.5$\;
+$\textit{rep}_k(x', \textit{ruido})$\;
+\end{algorithm}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Catálogo de operadores, en el orden de sus índices en el código.}
+\label{tab:catalogo}
+\begin{tabularx}{\textwidth}{@{}c l L@{}}
+\toprule
+Índice & Operador & Criterio \\
+\midrule
+\multicolumn{3}{@{}l}{\emph{Destrucción}}\\
+0 & \cod{randomRemoval} & Clientes al azar \\
+1 & \cod{routeRemoval} & Rutas completas al azar \\
+2 & \cod{worstRemoval} & Clientes cuyo retiro ahorra más distancia (aleatorizado) \\
+3 & \cod{shawRemoval} & Clientes parecidos entre sí en espacio, tiempo y demanda \\
+4 & \cod{clusterRemoval} & Uno de los dos grupos geográficos de una ruta, y así en rutas vecinas \\
+5 & \cod{timeWindowRemoval} & Clientes con las ventanas de tiempo más estrechas \\
+\midrule
+\multicolumn{3}{@{}l}{\emph{Reparación} (cada una, con o sin ruido en los costos)}\\
+0 & \cod{greedyInsertion} & Inserción de menor costo \\
+1 & \cod{regret2Insertion} & Mayor arrepentimiento entre las dos mejores posiciones \\
+2 & \cod{regret3Insertion} & Mayor arrepentimiento entre las tres mejores rutas \\
+3 & \cod{regret4Insertion} & Mayor arrepentimiento entre las cuatro mejores rutas \\
+4 & \cod{regretMInsertion} & Mayor arrepentimiento sobre todas las rutas \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Grado de destrucción.} Se sortea de forma uniforme entre el 10\,\% y el 40\,\% de
+los clientes, con los topes absolutos de Pisinger y Ropke~\cite{pisinger2007}:
+\[
+q\in\bigl[\min(0.1\,n,\ 30),\ \min(0.4\,n,\ 60)\bigr],
+\]
+es decir, $q\in[10,40]$ para $n=100$, $q\in[20,60]$ para $n=200$ y $q\in[30,60]$ para todo
+$n\ge 300$. En las instancias de $400$, $600$ y $800$ clientes el vecindario tiene, por tanto,
+el mismo tamaño absoluto y representa una fracción decreciente de la solución (entre el
+3.75\,\% y el 7.5\,\% para $n=800$). El tope mantiene acotado el costo de una iteración, que
+está dominado por la reparación (Sección~\ref{sec:reparacion}), y es lo que hace asumible un
+presupuesto de hasta $2\,T_{\max}=50\,000$ iteraciones en las instancias grandes. En la fase~1
+la reparación debe reinsertar, además de los $q$ clientes extraídos, los que ya estaban en el
+banco.
+
+\paragraph{Ruido.} En cada iteración se decide con probabilidad $0.5$, de forma independiente
+del par elegido, si la reparación trabaja con los costos de inserción exactos o con costos
+perturbados (Sección~\ref{sec:ruido}). El ruido no es un operador aparte ni una decisión del
+mecanismo de aprendizaje: cada operador de reparación se aplica, en promedio, la mitad de las
+veces en cada modalidad, y el crédito que recibe mezcla ambas.

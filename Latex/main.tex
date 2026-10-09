@@ -1,0 +1,41 @@
+% Compilar desde esta carpeta con:   latexmk        (usa .latexmkrc)
+% o bien, sin latexmk:               pdflatex main.tex   (dos veces)
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.5cm]{geometry}
+\input{preambulo}
+
+\title{Análisis algorítmico de ALNS y ALNS con Q-learning\\ para el VRPTW\\[4pt]
+\large Estructura de datos, métodos de selección, operadores y optimizaciones}
+\author{Documento técnico de apoyo a la tesis}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent Este documento describe, a nivel de pseudocódigo y con su justificación teórica, la
+implementación de los dos métodos comparados en la tesis para el problema de ruteo de vehículos
+con ventanas de tiempo (VRPTW): un ALNS con selección adaptativa por ruleta (\cod{ALNS\_Classic})
+y un ALNS cuya selección de operadores se aprende con Q-learning (\cod{ALNS\_QLearning}).
+Se detallan el bucle de búsqueda común en dos fases (minimización de rutas y minimización de
+distancia), los dos mecanismos de selección y aprendizaje, los seis operadores de
+destrucción, los cinco de reparación y las optimizaciones algorítmicas que
+determinan el costo por iteración. Todos los valores numéricos corresponden a las constantes y
+parámetros por defecto del código fuente.
+\end{abstract}
+
+\tableofcontents
+\listofalgorithms
+\clearpage
+
+\input{secciones/01_alcance}
+\input{secciones/02_modelo}
+\input{secciones/03_alns_base}
+\input{secciones/04_alns_clasico}
+\input{secciones/05_alns_qlearning}
+\input{secciones/06_destruccion}
+\input{secciones/07_reparacion}
+\input{secciones/08_sintesis}
+\input{secciones/99_referencias}
+
+\end{document}

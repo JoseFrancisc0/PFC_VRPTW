@@ -1,0 +1,98 @@
+\section{ALNS clásico: selección por ruleta adaptativa}
+\label{sec:clasico}
+
+\cod{ALNS\_Classic} implementa el mecanismo adaptativo de Ropke y
+Pisinger~\cite{ropke2006}. Mantiene dos ruletas \emph{independientes}, una para los $6$
+operadores de destrucción y otra para los $5$ de reparación. Cada ruleta guarda, para cada
+operador $i$, un peso $w_i$ (inicialmente $1$), un puntaje acumulado $S_i$ y un contador de
+usos $u_i$ dentro del segmento en curso.
+
+\subsection{Selección}
+
+En cada iteración se sortea un operador de cada ruleta con probabilidad proporcional a su peso:
+\begin{equation}
+P(i)=\frac{w_i}{\sum_{l} w_l}.
+\label{eq:ruleta}
+\end{equation}
+Como los dos sorteos son independientes, la probabilidad de un par es el producto
+$P^{-}(j)\,P^{+}(k)$: el método no puede representar que un operador de destrucción funcione
+mejor con un operador de reparación concreto.
+
+\subsection{Asignación de crédito y actualización}
+
+Tras evaluar la candidata, ambos operadores del par reciben el mismo puntaje $\sigma$, que
+depende únicamente de la \emph{categoría} del resultado y no de su magnitud:
+\begin{equation}
+\sigma=
+\begin{cases}
+33 & \text{si la candidata es un nuevo mejor global,}\\
+13 & \text{si mejora a la solución actual,}\\
+9  & \text{si no mejora pero es aceptada,}\\
+0  & \text{si es rechazada.}
+\end{cases}
+\label{eq:sigma}
+\end{equation}
+Los tres valores positivos son los propuestos en~\cite{ropke2006}, asignados aquí en orden
+monótono con la calidad del resultado. Las categorías se determinan comparando valores de
+$f$, por lo que valen igual en las dos fases: en la fase~1, colocar un cliente del banco es
+una mejora (y normalmente un nuevo mejor de la etapa), y una candidata que deja más clientes
+sin asignar que la solución actual es, en la práctica, un rechazo. Los pesos no cambian en cada iteración sino al cierre
+de cada segmento de $\ell=100$ iteraciones, con una media móvil exponencial sobre el puntaje
+medio del segmento:
+\begin{equation}
+w_i\gets\max\Bigl(w_{\min},\ \lambda\,w_i+(1-\lambda)\,\frac{S_i}{u_i}\Bigr)\quad\text{si }u_i>0,
+\qquad \lambda=0.9,\quad w_{\min}=0.01.
+\label{eq:pesos}
+\end{equation}
+Un operador que no se usó en el segmento conserva su peso. El Algoritmo~\ref{alg:clasico}
+reúne ambas operaciones.
+
+\begin{algorithm}[H]
+\caption{Selección y aprendizaje del ALNS clásico (\cod{ALNS\_Classic})}
+\label{alg:clasico}
+\SetKwProg{Proc}{procedimiento}{}{}
+\Proc{\textnormal{\fn{Seleccionar}($t$)}}{
+  $j\gets$ sorteo en la ruleta de destrucción según~\eqref{eq:ruleta}\;
+  $k\gets$ sorteo en la ruleta de reparación según~\eqref{eq:ruleta}\;
+  \Devolver $(j,k)$\;
+}
+\Proc{\textnormal{\fn{Aprender}($t$, $o$)}}{
+  $\sigma\gets$ puntaje de $o$ según~\eqref{eq:sigma}\;
+  $S^{-}_j\gets S^{-}_j+\sigma$;\quad $u^{-}_j\gets u^{-}_j+1$\;
+  $S^{+}_k\gets S^{+}_k+\sigma$;\quad $u^{+}_k\gets u^{+}_k+1$\;
+  \Si(\Com*[f]{cierre de segmento}){$t \bmod 100=0$}{
+    \ParaCada{ruleta y cada operador $i$ de la ruleta}{
+      \lSi{$u_i>0$}{$w_i\gets\max\bigl(w_{\min},\ \lambda w_i+(1-\lambda)S_i/u_i\bigr)$}
+      $S_i\gets 0$;\quad $u_i\gets 0$\;
+    }
+  }
+}
+\end{algorithm}
+
+\subsection{Propiedades relevantes}
+
+\begin{itemize}
+\item \textbf{Normalización por uso.} El peso se actualiza con el puntaje \emph{medio}
+$S_i/u_i$, por lo que un operador elegido con frecuencia no se refuerza solo por haber sido
+usado más veces.
+\item \textbf{Inercia.} Con $\lambda=0.9$ cada segmento aporta el 10\,\% del peso nuevo. El
+puntaje medio está acotado en $[0,33]$, de modo que los pesos convergen hacia ese rango de
+forma gradual: partiendo de $w_i=1$, hacen falta varios segmentos (varios cientos de
+iteraciones) para que la distribución se aleje de la uniforme. Los segmentos se cuentan
+sobre el índice global de iteración, sin distinguir etapas ni fases: en las $25\,000$
+iteraciones de la fase~2 hay $250$ actualizaciones de pesos, a las que se suman hasta otras
+$250$ en la fase~1.
+\item \textbf{Continuidad entre fases.} El método no reacciona al cambio de fase
+(\cod{onDistancePhase} conserva su implementación vacía): los pesos aprendidos mientras se
+eliminaban rutas son el punto de partida de la fase de distancia, y se readaptan al nuevo
+objetivo solo a través de la media móvil~\eqref{eq:pesos}.
+\item \textbf{Exploración permanente.} La selección es proporcional, no voraz, y $w_{\min}$
+impide que un peso se anule. Todos los operadores conservan una probabilidad no nula durante
+toda la búsqueda, y la distribución se adapta a la fase en curso (por ejemplo, los operadores
+que aceptan empeoramientos puntúan más cuando la temperatura es alta).
+\item \textbf{Crédito ordinal.} Una mejora mínima de distancia y la colocación de un cliente
+del banco reciben el mismo puntaje si pertenecen a la misma categoría; el método mide con qué frecuencia
+un operador tiene éxito, no cuánto mejora.
+\item \textbf{Sin contexto.} La distribución no depende del estado de la búsqueda más que a
+través de los pesos acumulados.
+\end{itemize}

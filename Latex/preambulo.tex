@@ -1,0 +1,60 @@
+% ---------------------------------------------------------------------------
+% Preambulo compartido. Para integrar las secciones en la plantilla de la
+% tesis basta con cargar este archivo (o copiar los paquetes y macros que
+% falten) y hacer \input de los archivos de secciones/.
+% ---------------------------------------------------------------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[spanish,es-tabla,es-nodecimaldot,es-noshorthands]{babel}
+\usepackage{microtype}
+
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs,array,tabularx}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{caption}
+\usepackage[ruled,vlined,linesnumbered]{algorithm2e}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+% --- Pseudocodigo en espanol (algorithm2e) ---------------------------------
+\SetAlgorithmName{Algoritmo}{algoritmo}{Índice de algoritmos}
+\DontPrintSemicolon
+\SetKwInOut{Entrada}{Entrada}
+\SetKwInOut{Salida}{Salida}
+\SetKwIF{Si}{SiNoSi}{SiNo}{si}{entonces}{si no, si}{si no}{fin si}
+\SetKwFor{Para}{para}{hacer}{fin para}
+\SetKwFor{ParaCada}{para cada}{hacer}{fin para}
+\SetKwFor{Mientras}{mientras}{hacer}{fin mientras}
+\SetKw{Devolver}{devolver}
+\SetKw{Salir}{salir del bucle}
+\SetKw{Continuar}{continuar}
+\SetKw{Y}{y}
+\SetKw{O}{o}
+\SetKw{Hasta}{hasta}
+\SetKwComment{Com}{$\triangleright$\ }{}
+\newcommand{\estilocom}[1]{\textnormal{\small\itshape #1}}
+\SetCommentSty{estilocom}
+\SetAlgoSkip{bigskip}
+\SetAlFnt{\small}
+\SetAlCapFnt{\small}
+\SetAlCapNameFnt{\small}
+
+% --- Macros de notacion ----------------------------------------------------
+\newcommand{\fn}[1]{\textsc{#1}}            % nombre de procedimiento
+\newcommand{\cod}[1]{\texttt{#1}}           % identificador del codigo fuente
+\newcommand{\Uns}{\mathcal{U}}                % clientes sin asignar
+\newcommand{\Rset}{\mathcal{R}}             % conjunto de rutas
+\newcommand{\unif}[2]{\mathrm{U}(#1,#2)}
+\newcommand{\unifint}[2]{\mathrm{U}\{#1,\dots,#2\}}
+\newcommand{\Rel}{\operatorname{Rel}}
+\newcommand{\alc}{\operatorname{alc}}
+\newcommand{\gbest}{g^{\mathrm{mej}}}
+\newcommand{\gcur}{g^{\mathrm{act}}}
+\newcommand{\xbest}{x^{*}}
+\newcommand{\INF}{\infty}
+\newcommand{\bigO}{\mathcal{O}}
+
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+\setlist{itemsep=2pt,topsep=4pt}

@@ -1,0 +1,101 @@
+\section{Síntesis: características que determinan el comportamiento}
+\label{sec:sintesis}
+
+Esta sección recoge, a partir del análisis anterior, las características de diseño que
+condicionan los resultados de ambos métodos. Se distinguen las que son comunes, y por tanto
+explican el nivel de calidad que alcanzan los dos, de las que los diferencian.
+
+\subsection{Características comunes}
+
+\begin{enumerate}
+\item \textbf{Rutas siempre factibles.} Las rutas nunca violan capacidad ni ventanas de
+tiempo. La única infactibilidad que admite la búsqueda son los clientes sin asignar, que
+tienen un peso fijo de $10^6$ en $f$; no hay otras penalizaciones que calibrar.
+\item \textbf{Objetivo jerárquico escalarizado.} Los pesos de $10^6$ por cliente sin asignar y
+de $10^4$ por vehículo hacen que colocar un cliente domine sobre cualquier reducción de flota,
+y esta sobre cualquier mejora de distancia, en la aceptación y en la detección de mejoras.
+\item \textbf{Reducción de flota en una fase propia.} La reparación no abre rutas, de modo que
+la flota es fija en cada etapa. La fase~1 elimina rutas una a una (retira la más corta y
+busca recolocar sus clientes con el ALNS completo) y se detiene al alcanzar la cota inferior
+de capacidad, al estancarse con $5$ o más clientes pendientes durante $2000$ iteraciones o al
+agotar $T_{\max}$ iteraciones. La fase~2 optimiza la distancia durante otras $T_{\max}$
+iteraciones con la flota resultante. El número de vehículos obtenido depende, por tanto, de
+la eficacia con que cada método selecciona operadores \emph{durante la fase~1}.
+\item \textbf{Vecindarios de tamaño acotado.} Se extrae entre el 10\,\% y el 40\,\% de los
+clientes, con topes de $30$ y $60$: a partir de $300$ clientes el vecindario tiene el mismo
+tamaño absoluto, lo que mantiene estable el costo por iteración al crecer la instancia.
+\item \textbf{Catálogo complementario.} Hay operadores de diversificación (extracción
+aleatoria), de intensificación (extracción de peores, inserción voraz), de estructura (Shaw,
+grupos, rutas), específicos de las ventanas de tiempo y con anticipación (arrepentimiento 2,
+3, 4 y sobre todas las rutas). El ruido en los costos de inserción, activo en la mitad de las
+iteraciones, diversifica cualquiera de las reparaciones.
+\item \textbf{Recocido con reinicios.} La temperatura proporcional a la distancia inicial,
+el enfriamiento geométrico y el retorno a la mejor solución con recalentamiento a
+$0.5\,T_0$ tras $1500$ iteraciones sin progreso evitan que la búsqueda se congele en los
+periodos de estancamiento. La temperatura vuelve a $T_0$ al comenzar cada etapa de la fase~1
+y al comenzar la fase~2.
+\item \textbf{Eficiencia por iteración.} La evaluación de inserciones en tiempo constante, las
+cachés por ruta y las estructuras incrementales de los operadores de destrucción reducen el
+costo de la reparación en un factor del orden del número de rutas. Al ser optimizaciones
+exactas, no modifican la trayectoria de búsqueda: lo que aportan es que un presupuesto de
+hasta $50\,000$ iteraciones por corrida sea alcanzable en las instancias de mayor tamaño.
+\end{enumerate}
+
+\subsection{Diferencias entre los dos métodos}
+
+Como ambos métodos comparten todo lo anterior y parten de la misma solución inicial con la
+misma semilla, cualquier diferencia de resultados se origina en los aspectos de la
+Tabla~\ref{tab:comparacion}.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Comparación de los mecanismos de selección y aprendizaje.}
+\label{tab:comparacion}
+\begin{tabularx}{\textwidth}{@{}l L L@{}}
+\toprule
+Aspecto & ALNS clásico & ALNS con Q-learning \\
+\midrule
+Unidad de decisión & Destrucción y reparación por separado ($6+5$ pesos) & Par conjunto ($30$ acciones) \\
+Contexto & Ninguno & Estado binario: si la iteración anterior mejoró \\
+Política & Sorteo proporcional a los pesos & $\varepsilon$-voraz, $\varepsilon\to 0.01$ \\
+Señal de crédito & Categoría del resultado: $33$, $13$, $9$, $0$ & Magnitud de la mejora relativa en su propio criterio, logarítmica, ponderada global/local y creciente en el tiempo \\
+Aceptación sin mejora & Se premia ($9$) & Se penaliza igual que un rechazo \\
+Iteración sin éxito & Puntaje $0$ & Recompensa negativa $-\tau\,\Omega$: la mejora media reciente del mejor par alternativo \\
+Frecuencia de actualización & Cada $100$ iteraciones & Cada iteración \\
+Memoria & Media móvil, $\lambda=0.9$ por segmento & Media móvil, $\alpha=0.5$ por visita \\
+Horizonte & Inmediato & Descontado, $\gamma=0.7$ \\
+Exploración & Permanente y proporcional ($w_{\min}=0.01$) & $200$ iteraciones uniformes al inicio de cada fase y después residual \\
+Cambio de fase & Sin reacción: los pesos continúan & Olvida las mejoras recientes y reinicia la exploración; conserva la tabla $Q$ \\
+Reparto de uso & Gradual entre todos los operadores & Concentrado en el par mejor valorado de cada estado \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+De la tabla se desprenden cuatro diferencias de comportamiento que conviene tener presentes al
+interpretar los resultados experimentales:
+
+\begin{itemize}
+\item \textbf{Sinergias entre operadores.} Solo el Q-learning puede aprender que un operador
+de destrucción rinde con un operador de reparación concreto: cada una de las seis
+destrucciones se valora por separado con cada una de las cinco reparaciones.
+\item \textbf{Qué se entiende por éxito.} El método clásico premia la aceptación, de modo que
+a temperatura alta refuerza a los operadores que generan soluciones aceptables aunque no
+mejoren. El Q-learning solo premia la mejora estricta y pondera su magnitud relativa, y
+penaliza cada fallo en proporción a lo que están rindiendo los demás pares.
+\item \textbf{Velocidad y concentración de la adaptación.} El método clásico modifica su
+distribución lentamente y mantiene en uso todo el catálogo; el Q-learning reacciona en pocas
+visitas y explota casi en exclusiva el par preferido de cada estado, cambiándolo cuando las
+penalizaciones lo desplazan. El primero es más estable y diverso; el segundo, más reactivo y
+más intensivo.
+\item \textbf{Adaptación al cambio de objetivo.} Al pasar de eliminar rutas a reducir
+distancia, el método clásico arrastra los pesos de la fase~1 y los corrige al ritmo de su
+media móvil; el Q-learning vuelve a explorar todos los pares de forma explícita antes de
+explotar. La fase~1 es, además, la que decide el número de vehículos, y en ella ambos
+mecanismos disponen de un número de iteraciones variable (a lo sumo $T_{\max}$) para aprender.
+\end{itemize}
+
+Estas afirmaciones describen el mecanismo, no su efecto medido. Para vincularlas con los
+resultados se recomienda acompañar las tablas comparativas con la frecuencia de uso de cada
+operador (o par) a lo largo de la búsqueda en ambos métodos, separada por fases, y con la
+duración de la fase~1.

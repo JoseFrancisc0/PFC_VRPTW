@@ -1,0 +1,241 @@
+\section{Operadores de destrucción}
+\label{sec:destruccion}
+
+Los seis operadores tienen la firma $\textit{des}(x,q)$: extraen aproximadamente $q$
+clientes de las rutas de $x$ y los añaden a $\Uns(x)$, que en la fase~1 puede contener ya
+clientes pendientes de iteraciones anteriores (el banco de la Sección~\ref{sec:fases}). Ninguno
+elimina rutas: una ruta que se queda sin clientes permanece en la solución como ruta vacía.
+Todos terminan actualizando $K(x)$ y $D(x)$. Como salvaguarda, los bucles de las extracciones
+aleatoria, de rutas, de peores y de Shaw se detienen si $|\Uns|$ alcanza $n-1$.
+
+Se denomina \emph{ruta activa} a la que tiene al menos un cliente, y \emph{costo de retiro} de
+un cliente $\pi_k$ al ahorro de distancia que produce quitarlo de su ruta:
+\begin{equation}
+\operatorname{cr}(\pi_k)=d_{\pi_{k-1}\pi_k}+d_{\pi_k\pi_{k+1}}-d_{\pi_{k-1}\pi_{k+1}}\ \ge 0 .
+\label{eq:cr}
+\end{equation}
+
+\subsection{Extracción aleatoria}
+
+\begin{algorithm}[H]
+\caption{\fn{ExtracciónAleatoria} (\cod{randomRemoval})}
+\label{alg:random}
+\Entrada{solución $x$, grado $q$}
+\Mientras{se hayan extraído menos de $q$ clientes \Y existan rutas activas}{
+  elegir una ruta activa $\pi$ uniformemente al azar\;
+  elegir una posición $k\sim\unifint{1}{L-2}$ de $\pi$\;
+  mover $\pi_k$ a $\Uns$;\quad \fn{RecalcularRuta}($\pi$)\;
+}
+\end{algorithm}
+
+El sorteo es en dos etapas (primero la ruta, luego el cliente), por lo que no es uniforme
+sobre los clientes: un cliente de una ruta con $L-2$ clientes se elige con probabilidad
+$1/(m_{\mathrm{act}}(L-2))$, donde $m_{\mathrm{act}}$ es el número de rutas activas, y los
+clientes de rutas cortas son más propensos a salir. Es el operador de diversificación pura y
+su costo es
+$\bigO\bigl(q\,(m+\bar{L})\bigr)$.
+
+\subsection{Extracción de rutas}
+
+\begin{algorithm}[H]
+\caption{\fn{ExtracciónDeRutas} (\cod{routeRemoval})}
+\label{alg:route}
+\Entrada{solución $x$, grado $q$}
+\Mientras{se hayan extraído menos de $q$ clientes \Y existan rutas activas}{
+  elegir una ruta activa $\pi$ uniformemente al azar\;
+  mover todos los clientes de $\pi$ a $\Uns$;\quad $\pi\gets(0,0)$\;
+}
+\end{algorithm}
+
+Vacía rutas enteras hasta alcanzar $q$, por lo que puede superar $q$ en hasta una ruta. La
+ruta vaciada permanece en la solución como ruta vacía: no cuenta como vehículo, pero queda
+disponible para la reparación. El operador obliga a redistribuir por completo los clientes de
+varios vehículos. Como la reparación no abre rutas, es además el principal mecanismo por el
+que la fase~2 puede terminar con menos vehículos que los heredados de la fase~1: basta con
+que los clientes de una ruta vaciada se recoloquen en las demás.
+
+\subsection{Extracción de los peores}
+\label{sec:worst}
+
+Extrae clientes con costo de retiro alto, es decir, los que están «mal colocados». La
+elección se aleatoriza como en~\cite{ropke2006}: con la lista $\mathcal{L}$ de clientes
+ordenada por costo de retiro decreciente, se toma el elemento de índice
+\begin{equation}
+\iota=\bigl\lfloor y^{\,p}\,|\mathcal{L}|\bigr\rfloor,\qquad y\sim\unif{0}{1},\quad p=3 .
+\label{eq:sesgo}
+\end{equation}
+Como $P(\iota<k)=(k/|\mathcal{L}|)^{1/p}$, con $p=3$ el 10\,\% superior de la lista se elige
+con probabilidad $0.46$ y el 1\,\% superior con probabilidad $0.22$: hay un sesgo fuerte
+hacia los peores sin llegar a ser determinista.
+
+\paragraph{Optimización: lista ordenada incremental.} La formulación directa recalcula y
+ordena los costos de todos los clientes antes de cada extracción, con costo
+$\bigO(q\,n\log n)$. Pero retirar un cliente solo cambia el costo de retiro de sus dos vecinos
+en la ruta. El Algoritmo~\ref{alg:worst} ordena una sola vez y después mantiene la lista:
+el cliente extraído y sus vecinos se localizan por búsqueda binaria, usando el orden total
+(costo decreciente, identificador creciente), y se reubican. Un mapa auxiliar cliente
+$\to$ ruta evita buscar al cliente en toda la solución.
+
+\begin{algorithm}[H]
+\caption{\fn{ExtracciónDePeores} (\cod{worstRemoval})}
+\label{alg:worst}
+\Entrada{solución $x$, grado $q$}
+construir $\textit{rutaDe}[\cdot]$ (cliente $\to$ índice de ruta)\;
+calcular $\operatorname{cr}(i)$ para todo cliente en ruta según~\eqref{eq:cr}\;
+$\mathcal{L}\gets$ clientes ordenados por ($\operatorname{cr}$ decreciente, identificador creciente)\;
+\Mientras{se hayan extraído menos de $q$ clientes \Y $\mathcal{L}\neq\emptyset$}{
+  $y\sim\unif{0}{1}$;\quad $\iota\gets\min\bigl(\lfloor y^{p}|\mathcal{L}|\rfloor,\ |\mathcal{L}|-1\bigr)$\;
+  \uSi{$\mathcal{L}[\iota]$ empata en costo con $\mathcal{L}[\iota-1]$ \O con $\mathcal{L}[\iota+1]$}{
+    $i\gets$ \fn{ReferenciaPeores}($x$, $\iota$) \Com*[r]{ordenamiento completo original}
+  }
+  \lSiNo{$i\gets\mathcal{L}[\iota]$}
+  $\pi\gets$ ruta $\textit{rutaDe}[i]$;\quad $k\gets$ posición de $i$ en $\pi$\;
+  quitar $i$ de $\mathcal{L}$ por búsqueda binaria;\quad $\textit{rutaDe}[i]\gets -1$\;
+  mover $i$ a $\Uns$;\quad \fn{RecalcularRuta}($\pi$)\;
+  \ParaCada{vecino $v\in\{\pi_{k-1},\pi_k\}$ con $v\neq 0$}{
+    $c'\gets\operatorname{cr}(v)$ en la ruta modificada\;
+    \lSi{$c'\neq\operatorname{cr}(v)$ anterior}{reubicar $v$ en $\mathcal{L}$ por búsqueda binaria con costo $c'$}
+  }
+}
+\end{algorithm}
+
+\paragraph{Equivalencia con la versión de referencia.} Cuando el elemento elegido empata en
+costo con alguno de sus vecinos en la lista, el orden entre ellos depende del algoritmo de
+ordenamiento; en ese caso el operador delega la elección en el procedimiento original
+(\cod{worstByFullSort}), que reconstruye y ordena la lista completa. Cuando no hay empate, el
+elemento de índice $\iota$ es único y coincide en ambas versiones. De este modo la versión
+optimizada elige siempre el mismo cliente que la original y, para una misma semilla, la
+trayectoria de búsqueda es idéntica: la optimización reduce el tiempo de cómputo sin alterar
+los resultados. El mismo principio se aplica en la extracción de Shaw y en los operadores de
+reparación.
+
+El costo pasa de $\bigO(q\,n\log n)$ a $\bigO(n\log n)$ para el ordenamiento inicial más, por
+extracción, tres búsquedas binarias, el desplazamiento contiguo de elementos de la lista y un
+recálculo de ruta $\bigO(\bar{L})$.
+
+\subsection{Extracción de Shaw}
+\label{sec:shaw}
+
+Propuesta por Shaw~\cite{shaw1998}, extrae clientes \emph{parecidos} entre sí, con la idea de
+que son intercambiables y la reparación podrá recolocarlos de otra manera. La afinidad entre
+dos clientes combina distancia, diferencia de apertura de ventana y diferencia de demanda
+(menor valor significa más afinidad):
+\begin{equation}
+\Rel(i,j)=9\,d_{ij}+3\,|a_i-a_j|+2\,|\mu_i-\mu_j| .
+\label{eq:rel}
+\end{equation}
+Los pesos $(9,3,2)$ son los de~\cite{ropke2006}; los términos no se normalizan, por lo que su
+influencia relativa depende de las escalas de la instancia. El primer cliente se elige al azar
+(ruta y posición). Después, en cada paso, se toma como base un cliente al azar entre los ya
+extraídos y se extrae uno de los que siguen en ruta, elegido entre los más afines a la base
+con el mismo sesgo~\eqref{eq:sesgo} ($p=3$).
+
+\paragraph{Optimización: orden de afinidad precalculado.} $\Rel(i,j)$ depende solo de la
+instancia, no de la solución. Por ello el orden de afinidad de cada cliente respecto de todos
+los demás puede calcularse una única vez. La primera invocación del operador construye la
+tabla $\textit{orden}[b]$ (\cod{Instance::shaw\_order}), que contiene para cada cliente $b$
+los otros $n-1$ clientes ordenados por (afinidad creciente, identificador creciente). El costo
+es $\bigO(n^2\log n)$ una sola vez por ejecución y la memoria $n(n-1)$ enteros (unos $2.6$~MB
+para $n=800$); la tabla pertenece a la instancia y la comparten todas las soluciones.
+
+A partir de ahí no se ordena nada: el Algoritmo~\ref{alg:shaw} recorre la fila de la base
+saltando los clientes que ya no están en ruta hasta alcanzar el rango deseado. Como el sesgo
+concentra $\iota$ en valores pequeños, el recorrido suele ser corto.
+
+\begin{algorithm}[H]
+\caption{\fn{ExtracciónDeShaw} (\cod{shawRemoval})}
+\label{alg:shaw}
+\Entrada{solución $x$, grado $q$}
+elegir al azar una ruta activa y un cliente $i_0$ de ella; mover $i_0$ a $\Uns$\;
+$\mathcal{E}\gets\{i_0\}$ \Com*[r]{clientes extraídos por este operador}
+construir $\textit{rutaDe}[\cdot]$;\quad $\textit{enRuta}\gets$ número de clientes en ruta\;
+\Mientras{$|\mathcal{E}|<q$ \Y $\textit{enRuta}>0$}{
+  $b\gets$ elemento al azar de $\mathcal{E}$\;
+  $y\sim\unif{0}{1}$;\quad $\iota\gets\min\bigl(\lfloor y^{p}\,\textit{enRuta}\rfloor,\ \textit{enRuta}-1\bigr)$\;
+  recorrer $\textit{orden}[b]$ saltando los clientes con $\textit{rutaDe}=-1$ hasta obtener los de rango $\iota-1$, $\iota$ e $\iota+1$\;
+  $i\gets$ cliente de rango $\iota$\;
+  \Si{$\Rel(b,i)$ empata con la del rango $\iota-1$ \O la del rango $\iota+1$}{
+    $i\gets$ \fn{ReferenciaShaw}($x$, $b$, $\iota$) \Com*[r]{ordenamiento completo original}
+  }
+  mover $i$ a $\Uns$ y a $\mathcal{E}$;\quad \fn{RecalcularRuta}(ruta de $i$)\;
+  $\textit{rutaDe}[i]\gets -1$;\quad $\textit{enRuta}\gets\textit{enRuta}-1$\;
+}
+\end{algorithm}
+
+El costo por extracción pasa de $\bigO(n\log n)$ (calcular y ordenar las afinidades de todos
+los clientes en ruta) a un recorrido lineal en el peor caso y típicamente mucho más corto. El
+tratamiento de empates es el mismo que en la Sección~\ref{sec:worst} y garantiza la
+equivalencia con la versión de referencia.
+
+\subsection{Extracción de grupos}
+\label{sec:cluster}
+
+Es la extracción de \emph{clusters} de Pisinger y Ropke~\cite{pisinger2007}. Parte de la
+observación de que, al extraer clientes parecidos de una ruta, la reparación tiende a
+devolverlos a ella si el resto de la ruta sigue cerca. El operador divide los clientes de una
+ruta en dos grupos geográficos y extrae uno \emph{entero}, y repite el proceso en rutas
+vecinas hasta alcanzar $q$ (Algoritmo~\ref{alg:cluster}).
+
+Los dos grupos se obtienen con el algoritmo de Kruskal sobre el grafo completo de los clientes
+de la ruta, con las distancias $d_{ij}$ como pesos, \emph{detenido cuando quedan dos
+componentes conexas}: las aristas se recorren de menor a mayor y cada una fusiona las
+componentes de sus extremos si son distintas (estructura de conjuntos disjuntos con
+compresión de caminos). El resultado equivale a quitar la arista más larga del árbol de
+expansión mínima, es decir, a separar la ruta por su mayor salto espacial.
+
+\begin{algorithm}[H]
+\caption{\fn{ExtracciónDeGrupos} (\cod{clusterRemoval})}
+\label{alg:cluster}
+\Entrada{solución $x$, grado $q$}
+$\pi\gets$ ruta activa elegida uniformemente al azar;\quad $\mathcal{E}\gets\emptyset$ \Com*[r]{extraídos por este operador}
+\Mientras{exista $\pi$}{
+  $\mathcal{C}\gets$ clientes de $\pi$\;
+  ordenar los pares $\{a,b\}\subseteq\mathcal{C}$ por $d_{ab}$ creciente\;
+  fusionar componentes en ese orden hasta que queden $2$ \Com*[r]{Kruskal truncado}
+  $\mathcal{G}\gets$ componente de un cliente de $\mathcal{C}$ elegido uniformemente al azar\;
+  mover los clientes de $\mathcal{G}$ a $\Uns$ y a $\mathcal{E}$;\quad \fn{RecalcularRuta}($\pi$)\;
+  \lSi{$|\mathcal{E}|\ge q$}{\Salir}
+  $s\gets$ elemento al azar de $\mathcal{E}$\;
+  $\pi\gets$ ruta, distinta de la actual, que contiene al cliente en ruta más cercano a $s$ (ninguna si no quedan clientes en otras rutas)\;
+}
+\end{algorithm}
+
+Conviene destacar tres detalles:
+\begin{itemize}
+\item \textbf{Elección del grupo.} El grupo se elige sorteando un cliente de la ruta, no una
+de las dos componentes, por lo que la probabilidad de extraer un grupo es proporcional a su
+tamaño. Si la ruta tiene uno o dos clientes, cada componente es un único cliente; con un solo
+cliente, la ruta queda vacía.
+\item \textbf{Encadenamiento.} La siguiente ruta es la del cliente más cercano a uno de los ya
+extraídos, lo que concentra la destrucción en una región del plano: los grupos extraídos son
+vecinos entre sí y pueden intercambiarse entre rutas adyacentes. Solo se excluye la ruta
+recién tratada, de modo que el proceso puede volver más adelante a una ruta ya dividida y
+dividir lo que quedó de ella.
+\item \textbf{Grado efectivo.} El operador extrae grupos completos, así que puede superar $q$
+en hasta un grupo.
+\end{itemize}
+Frente a la extracción de Shaw, que elige cliente a cliente por afinidad con sesgo aleatorio,
+aquí la unidad extraída es un bloque espacial compacto y contiguo de una ruta. El costo por
+ruta tratada es $\bigO(\bar{L}^{2}\log\bar{L})$ para ordenar los pares, más $\bigO(n)$ para
+localizar la ruta siguiente.
+
+\subsection{Extracción por ventana de tiempo}
+
+\begin{algorithm}[H]
+\caption{\fn{ExtracciónPorVentana} (\cod{timeWindowRemoval})}
+\label{alg:tw}
+\Entrada{solución $x$, grado $q$}
+$\mathcal{C}\gets$ clientes en ruta ordenados por anchura de ventana $b_i-a_i$ creciente\;
+$\mathcal{D}\gets$ los $\min(q,|\mathcal{C}|)$ primeros de $\mathcal{C}$\;
+ordenar $\mathcal{D}$ por (ruta, posición) decreciente \Com*[r]{mantiene válidos los índices al borrar}
+\ParaCada{$i\in\mathcal{D}$}{
+  mover $i$ a $\Uns$;\quad \fn{RecalcularRuta}(ruta de $i$)\;
+}
+\end{algorithm}
+
+Es un operador específico del VRPTW. Los clientes con ventanas estrechas son los más difíciles
+de ubicar y los que condicionan la estructura temporal de las rutas; al extraerlos todos a la
+vez, la reparación puede redecidir su asignación de forma conjunta en lugar de heredar su
+posición. Es el único operador de destrucción determinista: para una solución y un $q$ dados
+extrae siempre el mismo conjunto, de modo que su variabilidad proviene de $q$, del operador de
+reparación con que se empareje y del ruido de este. Su costo es $\bigO(n\log n)$.

@@ -1,0 +1,50 @@
+\section{Alcance y organización del código}
+\label{sec:alcance}
+
+El solver está escrito en C++ y separa con claridad tres responsabilidades: la
+representación del problema, los operadores de vecindario y el control de la búsqueda.
+La Tabla~\ref{tab:modulos} resume qué contiene cada módulo y en qué sección de este documento
+se analiza.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Módulos del solver y sección donde se documentan.}
+\label{tab:modulos}
+\begin{tabularx}{\textwidth}{@{}l L c@{}}
+\toprule
+Archivo & Contenido & Sección \\
+\midrule
+\cod{VRPTW Environment/instance.*} & Instancia, cliente, ruta; matrices precalculadas; recálculo de una ruta & \ref{sec:modelo} \\
+\cod{VRPTW Environment/solution.*} & Solución, función de costo, solución inicial & \ref{sec:modelo} \\
+\cod{Utils/params.h} & Parámetros ajustables del Q-learning (\cod{SolverParams}) & \ref{sec:ql} \\
+\cod{ALNS/alns.*} & Bucle común en dos fases (rutas y distancia): recocido simulado, aceptación, reinicio por estancamiento & \ref{sec:base} \\
+\cod{ALNS/alns\_classic.*} & Selección por ruleta con pesos adaptativos & \ref{sec:clasico} \\
+\cod{ALNS/alns\_qlearning.*} & Selección $\varepsilon$-voraz sobre una tabla $Q$ & \ref{sec:ql} \\
+\cod{Operators/operators.*} & Catálogo de operadores y grado de destrucción & \ref{sec:base} \\
+\cod{Operators/destroy\_ops.cpp} & Seis operadores de destrucción & \ref{sec:destruccion} \\
+\cod{Operators/repair\_ops.cpp} & Evaluación de inserción y cinco operadores de reparación & \ref{sec:reparacion} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+La clase abstracta \cod{ALNS} implementa el bucle de búsqueda completo y delega únicamente dos
+decisiones en sus subclases, mediante los métodos virtuales \cod{selectOperators} y
+\cod{learn}. Un tercer método virtual, \cod{onDistancePhase}, es solo un aviso de que comienza
+la segunda fase de la búsqueda (Sección~\ref{sec:fases}); por defecto no hace nada. En
+consecuencia, \cod{ALNS\_Classic} y \cod{ALNS\_QLearning} comparten
+\emph{exactamente} la misma solución inicial, los mismos operadores, el mismo criterio de
+aceptación, el mismo esquema de temperatura, la misma división en fases y el mismo generador de números aleatorios
+(\cod{std::mt19937}, sembrado con la misma semilla para ambos algoritmos en cada corrida).
+Lo único que cambia entre los dos métodos es \emph{qué par de operadores se elige en cada
+iteración y cómo se actualiza esa preferencia}. Esta propiedad de diseño es la que permite
+atribuir las diferencias de resultados al mecanismo de selección y no a otro componente.
+
+\paragraph{Notación.} Se usa $n$ para el número de clientes, $m$ para el número de rutas de
+una solución, $\bar{L}=n/m$ para la longitud media de una ruta, $q$ para el número de clientes
+que se extraen en una iteración (grado de destrucción) y $T_{\max}$ para el presupuesto de
+iteraciones que recibe el solver. $T_{\max}$ es el número exacto de iteraciones de la fase de
+minimización de distancia; la fase previa de minimización de rutas consume, como máximo, otras
+$T_{\max}$, de modo que una corrida ejecuta entre $T_{\max}$ y $2\,T_{\max}$ iteraciones. En
+los experimentos de la tesis $T_{\max}=25\,000$ y cada instancia se resuelve con 10 semillas
+por algoritmo.

@@ -1,0 +1,180 @@
+\section{Modelo de datos y evaluación de factibilidad}
+\label{sec:modelo}
+
+\subsection{Instancia}
+
+Una instancia (\cod{Instance}) se lee en el formato de Solomon~\cite{solomon1987}, que también
+usan las instancias de Gehring y Homberger~\cite{gehring1999}. Contiene el depósito (nodo $0$) y
+$n$ clientes ($N=n+1$ nodos). Cada nodo $i$ tiene coordenadas $(x_i,y_i)$, demanda $\mu_i$,
+ventana de tiempo $[a_i,b_i]$ (\cod{ready\_time}, \cod{due\_date}) y tiempo de servicio $s_i$.
+Todos los vehículos tienen capacidad $Q$. El archivo declara además un tamaño de flota, que el
+solver lee pero \emph{no impone} como restricción: el número de vehículos es un objetivo, no
+un límite. La flota con la que trabaja cada etapa de la búsqueda la fija el propio algoritmo
+(Sección~\ref{sec:fases}).
+
+Al construir la instancia se precalculan dos matrices $N\times N$ que se consultan en tiempo
+constante durante toda la búsqueda:
+\begin{align}
+d_{ij} &= \sqrt{(x_i-x_j)^2+(y_i-y_j)^2}, \label{eq:dist}\\
+\alc(i,j) &= \bigl[\, i\neq j \ \wedge\ a_i+s_i+d_{ij}\le b_j \,\bigr]. \label{eq:alc}
+\end{align}
+La distancia~\eqref{eq:dist} es euclidiana en doble precisión, sin redondeo ni truncamiento, y
+coincide con el tiempo de viaje. La matriz de alcanzabilidad~\eqref{eq:alc} indica si es
+posible visitar $j$ inmediatamente después de $i$ en el mejor caso (saliendo de $i$ lo antes
+posible); si $\alc(i,j)$ es falso, el arco $(i,j)$ no puede aparecer en ninguna ruta
+factible. Es una condición necesaria, no suficiente, y se usa como filtro previo barato.
+Durante el mismo precálculo se guarda la mayor distancia entre dos nodos,
+$d_{\max}=\max_{i,j}d_{ij}$ (\cod{max\_dist}), que fija la amplitud del ruido de los
+operadores de reparación (Sección~\ref{sec:ruido}).
+
+La instancia guarda además una tercera estructura, \cod{shaw\_order}, que se construye de
+forma perezosa la primera vez que se necesita y se describe en la
+Sección~\ref{sec:shaw}.
+
+\subsection{Ruta}
+
+Una ruta (\cod{Route}) es una secuencia $\pi=(\pi_0,\pi_1,\dots,\pi_{L-1})$ con
+$\pi_0=\pi_{L-1}=0$. Una ruta con $L=2$ está vacía y no cuenta como vehículo usado. Junto a
+la secuencia se almacenan su carga, su distancia y tres vectores de longitud $L$:
+\begin{itemize}
+\item $A_k$: instante de llegada a $\pi_k$ (\cod{arrival\_times});
+\item $W_k=\max(0,\,a_{\pi_k}-A_k)$: espera en $\pi_k$ hasta que abre su ventana (\cod{wait\_times});
+\item $F_k$: holgura temporal hacia adelante (\cod{time\_slacks}), es decir, cuánto puede
+retrasarse el inicio del servicio en $\pi_k$ sin violar la ventana de $\pi_k$ ni la de ningún
+nodo posterior de la ruta.
+\end{itemize}
+El inicio del servicio en $\pi_k$ es $\max(A_k,a_{\pi_k})$. La holgura sigue la recurrencia
+clásica de Savelsbergh~\cite{savelsbergh1992}:
+\begin{equation}
+F_{L-1}=b_{0}-\max(A_{L-1},a_{0}),\qquad
+F_k=\min\bigl(b_{\pi_k}-\max(A_k,a_{\pi_k}),\; F_{k+1}+W_{k+1}\bigr).
+\label{eq:slack}
+\end{equation}
+El segundo término expresa que un retraso en $\pi_k$ se transmite al nodo siguiente, donde
+primero consume la espera $W_{k+1}$ (tiempo que de todos modos se iba a perder) y solo el
+excedente consume su holgura $F_{k+1}$.
+
+El Algoritmo~\ref{alg:recalcular} recalcula todos estos valores con una pasada hacia adelante
+y otra hacia atrás, en tiempo $\bigO(L)$. Se invoca cada vez que una ruta cambia.
+
+\begin{algorithm}[H]
+\caption{\fn{RecalcularRuta} (\cod{Route::recalculate})}
+\label{alg:recalcular}
+\Entrada{ruta $\pi$ de longitud $L$, instancia}
+\Salida{carga, distancia y vectores $A$, $W$, $F$ de la ruta}
+$\textit{carga}\gets 0$;\quad $\textit{dist}\gets 0$;\quad $A_0\gets 0$;\quad $W_0\gets 0$\;
+\Para{$k\gets 0$ \Hasta $L-2$}{
+  $u\gets\pi_k$;\quad $v\gets\pi_{k+1}$\;
+  $\textit{dist}\gets\textit{dist}+d_{uv}$\;
+  \lSi{$u\neq 0$}{$\textit{carga}\gets\textit{carga}+\mu_u$}
+  $A_{k+1}\gets\max(A_k,a_u)+s_u+d_{uv}$ \Com*[r]{inicio de servicio en $u$ + servicio + viaje}
+  $W_{k+1}\gets\max(0,\,a_v-A_{k+1})$\;
+}
+$F_{L-1}\gets b_{0}-\max(A_{L-1},a_{0})$\;
+\Para{$k\gets L-2$ \Hasta $0$}{
+  $F_k\gets\min\bigl(b_{\pi_k}-\max(A_k,a_{\pi_k}),\;F_{k+1}+W_{k+1}\bigr)$\;
+}
+\end{algorithm}
+
+\subsection{Evaluación de una inserción en tiempo constante}
+\label{sec:evalins}
+
+La operación más frecuente de todo el solver es preguntar si un cliente $u$ puede insertarse
+entre $\pi_k$ y $\pi_{k+1}$ y cuánto aumenta la distancia. Con los vectores $A$, $W$ y $F$ la
+respuesta se obtiene en $\bigO(1)$, sin recorrer el resto de la ruta
+(Algoritmo~\ref{alg:evalins}).
+
+\begin{algorithm}[H]
+\caption{\fn{EvaluarInserción} (\cod{evalInsertion})}
+\label{alg:evalins}
+\Entrada{cliente $u$, ruta $\pi$ con $A,W,F$ vigentes, posición $k$}
+\Salida{(\textit{factible}, $\Delta$)}
+$i\gets\pi_k$;\quad $j\gets\pi_{k+1}$\;
+\lSi{$\neg\alc(i,u)$ \O $\neg\alc(u,j)$}{\Devolver (falso, --)}
+$A_u\gets\max(A_k,a_i)+s_i+d_{iu}$ \Com*[r]{llegada a $u$}
+\lSi{$A_u>b_u$}{\Devolver (falso, --)}
+$A'_j\gets\max(A_u,a_u)+s_u+d_{uj}$ \Com*[r]{nueva llegada a $j$}
+$\textit{retraso}\gets\max(0,\,A'_j-A_{k+1})$\;
+\lSi{$\textit{retraso}>W_{k+1}+F_{k+1}$}{\Devolver (falso, --)}
+$\Delta\gets d_{iu}+d_{uj}-d_{ij}$\;
+\Devolver (verdadero, $\Delta$)\;
+\end{algorithm}
+
+La corrección de la prueba se sigue de la definición de $F$: el retraso en la llegada a $j$
+es absorbido primero por la espera $W_{k+1}$, y el inicio del servicio en $j$ se desplaza en
+$\max(0,\textit{retraso}-W_{k+1})$, que por~\eqref{eq:slack} es admisible para $j$ y para todos
+los nodos posteriores si y solo si no supera $F_{k+1}$. La restricción de capacidad no depende
+de la posición, por lo que se verifica una sola vez por ruta
+($\textit{carga}+\mu_u\le Q$) antes de recorrer sus posiciones.
+
+Evaluar todas las posiciones de una ruta cuesta entonces $\bigO(L)$ en lugar de
+$\bigO(L^2)$, y evaluar un cliente contra toda la solución cuesta $\bigO(n+m)$. El precio es
+que cada modificación de una ruta exige un recálculo $\bigO(L)$
+(Algoritmo~\ref{alg:recalcular}), que es despreciable frente al número de evaluaciones que
+habilita.
+
+\subsection{Solución y función de costo}
+
+Una solución (\cod{Solution}) $x$ contiene el vector de rutas $\Rset(x)$, la lista $\Uns(x)$ de
+clientes sin asignar (\cod{unassigned}) y dos métricas agregadas que mantiene
+\cod{updateMetrics}: el número de vehículos $K(x)$, que cuenta solo las rutas no vacías, y la
+distancia total $D(x)$ de esas rutas. Una solución es \emph{completa} si $\Uns(x)=\emptyset$.
+
+Todas las rutas son factibles en todo momento: los operadores de destrucción solo quitan
+clientes (lo que nunca rompe la factibilidad cuando se cumple la desigualdad triangular) y los
+de reparación solo ejecutan inserciones aceptadas por el Algoritmo~\ref{alg:evalins}. La
+búsqueda nunca visita soluciones con violaciones de capacidad o de ventanas; la única forma de
+infactibilidad posible es que queden clientes sin asignar, y la función de costo la penaliza
+de forma explícita.
+
+El objetivo jerárquico habitual del VRPTW (primero minimizar vehículos, después distancia) se
+escalariza con un peso fijo por vehículo, al que se antepone una penalización por cada
+cliente sin asignar:
+\begin{equation}
+f(x)=10^{6}\cdot|\Uns(x)|+10^{4}\cdot K(x)+D(x).
+\label{eq:costo}
+\end{equation}
+Mientras los pesos dominen a los términos siguientes (en particular, mientras $D(x)<10^4$ por
+cada vehículo de diferencia), comparar $f$ equivale a la comparación lexicográfica
+$(|\Uns|,K,D)$: primero colocar a todos los clientes, después usar menos vehículos y por
+último recorrer menos distancia. Gracias al primer término, $f$ está definida también para
+soluciones incompletas, que por tanto participan en la búsqueda como cualquier otra; esto es
+lo que permite la fase de minimización de rutas de la Sección~\ref{sec:fases}. La función $f$
+es la que usan el criterio de aceptación y la detección de mejoras; las ganancias que
+alimentan el aprendizaje se miden con el mismo orden lexicográfico, pero en términos
+relativos (Sección~\ref{sec:ganancia}).
+
+\subsection{Solución inicial}
+
+La solución inicial se construye con una heurística secuencial del vecino más cercano
+(Algoritmo~\ref{alg:inicial}): cada ruta parte del depósito y agrega repetidamente el cliente
+no visitado más cercano al último nodo que sea alcanzable, respete la capacidad, llegue dentro
+de su ventana y permita regresar al depósito antes de $b_0$. Cuando ningún cliente cumple
+estas condiciones la ruta se cierra y se abre otra. Es determinista, por lo que ambos
+algoritmos y todas las semillas parten de la misma solución; su calidad es deliberadamente
+modesta y toda la mejora posterior corresponde al ALNS.
+
+\begin{algorithm}[H]
+\caption{\fn{SoluciónInicial} (\cod{Solution::generateInitialSolution})}
+\label{alg:inicial}
+\Entrada{instancia}
+\Salida{solución $x$ con rutas factibles}
+\Mientras{queden clientes sin visitar}{
+  $\pi\gets(0,0)$;\quad $c\gets 0$;\quad $t\gets 0$;\quad $\textit{carga}\gets 0$\;
+  \Mientras{verdadero}{
+    $\mathcal{C}\gets\{\,i\text{ no visitado}:\ \alc(c,i),\ \textit{carga}+\mu_i\le Q,\ t_i\le b_i,\ t_i+s_i+d_{i0}\le b_0\,\}$\;
+    \hspace{2em}donde $t_i=\max(t+s_c+d_{ci},\,a_i)$\;
+    \uSi{$\mathcal{C}\neq\emptyset$}{
+      $i^\star\gets\arg\min_{i\in\mathcal{C}} d_{ci}$\;
+      insertar $i^\star$ al final de $\pi$; marcarlo visitado\;
+      $\textit{carga}\gets\textit{carga}+\mu_{i^\star}$;\quad $t\gets t_{i^\star}$;\quad $c\gets i^\star$\;
+    }
+    \SiNo{
+      \lSi{$c=0$}{enviar a $\Uns$ todos los clientes no visitados \Com*[f]{no caben ni solos}}
+      \Salir\;
+    }
+  }
+  \fn{RecalcularRuta}($\pi$);\quad agregar $\pi$ a $\Rset(x)$\;
+}
+actualizar $K(x)$ y $D(x)$\;
+\end{algorithm}

@@ -1,0 +1,236 @@
+\section{Operadores de reparación}
+\label{sec:reparacion}
+
+Los cinco operadores tienen la firma $\textit{rep}(x,\textit{ruido})$ y reinsertan los
+clientes de $\Uns(x)$ uno a uno. Todos son heurísticas constructivas de inserción: en cada
+paso eligen un cliente y una posición según su criterio, ejecutan la inserción y repiten. Son
+instancias de una misma plantilla (Sección~\ref{sec:cache}) y comparten las siguientes reglas.
+
+\begin{itemize}
+\item \textbf{Rutas admisibles.} Una ruta admite al cliente $u$ si
+$\textit{carga}+\mu_u\le Q$. Las rutas vacías que haya dejado la destrucción son rutas
+admisibles como cualquier otra.
+\item \textbf{Costo de inserción.} Es el incremento de distancia $\Delta$ del
+Algoritmo~\ref{alg:evalins}, exacto o perturbado con ruido (Sección~\ref{sec:ruido}). Insertar
+en una ruta vacía cuesta $2\,d_{0u}$ y \emph{no} incluye la penalización de $10^4$ por
+vehículo: la reparación razona solo en distancia. El control del número de vehículos recae en
+la estructura en dos fases de la búsqueda y en la función de costo, a través del criterio de
+aceptación.
+\item \textbf{Flota fija.} La reparación no abre rutas nuevas. Si ningún cliente pendiente
+tiene una inserción factible en las rutas existentes, termina y deja esos clientes en $\Uns$.
+La candidata resultante es incompleta y el bucle común la evalúa con la penalización de $10^6$
+por cliente sin asignar (Sección~\ref{sec:fases}).
+\end{itemize}
+
+\subsection{Formulación directa y su costo}
+
+Sea $U=|\Uns|$ el número de clientes por insertar: $U=q$ tras una destrucción en la fase~2, y
+$q$ más los clientes del banco en la fase~1. La formulación directa evalúa en cada paso todas
+las posiciones de todas las rutas para todos los clientes pendientes: $\bigO(U\,n)$
+evaluaciones por paso y $\bigO(U^2 n)$ en total. Aun con $q\le 60$, esto supone del orden de
+$10^6$ evaluaciones de inserción por iteración para $n=800$, demasiado para un presupuesto de
+decenas de miles de iteraciones por corrida.
+
+\subsection{Inserción con caché por ruta}
+\label{sec:cache}
+
+La observación clave es que una inserción modifica \emph{una sola ruta}. Las evaluaciones de
+todos los demás pares (cliente, ruta) siguen siendo válidas. El
+Algoritmo~\ref{alg:cache} (\cod{cachedInsertion}) mantiene una matriz
+$M[u][r]$ con un resumen de la ruta $r$ para el cliente pendiente $u$:
+\[
+M[u][r]=(\textit{mejor},\ \textit{segundo},\ \textit{pos}),
+\]
+el menor y el segundo menor costo de inserción factible de $u$ en $r$ y la posición del
+primero ($\infty$ si no existen). Calcular una entrada cuesta $\bigO(L_r)$ gracias a la
+evaluación en tiempo constante. Tras cada inserción en la ruta $r^\star$ solo se recalcula la
+columna $r^\star$.
+
+Sobre cada fila se define un \emph{agregador} $G[u]$ que la resume en lo que el criterio
+necesita: la ruta de destino y una \emph{clave} de prioridad. Los cinco operadores difieren
+únicamente en el agregador (Sección~\ref{sec:agregadores}).
+
+\begin{algorithm}[H]
+\caption{\fn{InserciónConCaché}$\langle G\rangle$ (\cod{cachedInsertion<Agg>})}
+\label{alg:cache}
+\Entrada{solución $x$ con $\Uns\neq\emptyset$; bandera \textit{ruido}; tipo de agregador $G$}
+$\nu\gets 0.025\,d_{\max}$ si \textit{ruido}; si no, $\nu\gets 0$ \Com*[r]{amplitud del ruido}
+\ParaCada{$u\in\Uns$}{
+  \lParaCada{ruta $r$}{$M[u][r]\gets$ \fn{Entrada}($u$, $r$, $\nu$)}
+  $G[u].\fn{reconstruir}(M[u])$\;
+}
+\Mientras{$\Uns\neq\emptyset$}{
+  $u^\star\gets\arg\max\{G[u].\textit{clave}:\ u\in\Uns,\ G[u]\text{ válido}\}$ \Com*[r]{primer máximo}
+  \lSi(\Com*[f]{flota fija: los restantes quedan sin asignar}){no existe $u^\star$}{\Salir}
+  $r^\star\gets G[u^\star].\textit{ruta}$\;
+  insertar $u^\star$ en $r^\star$ en la posición $M[u^\star][r^\star].\textit{pos}$;\quad \fn{RecalcularRuta}($r^\star$)\;
+  quitar $u^\star$ de $\Uns$, de $M$ y de $G$ \Com*[r]{en $\bigO(1)$, intercambiando con el último}
+  \ParaCada(\Com*[f]{solo cambió la columna $r^\star$}){$u\in\Uns$}{
+    $e_{\mathrm{ant}}\gets M[u][r^\star]$;\quad $M[u][r^\star]\gets$ \fn{Entrada}($u$, $r^\star$, $\nu$)\;
+    \lSi{$M[u][r^\star]\neq e_{\mathrm{ant}}$}{$G[u].\fn{actualizar}(M[u],\ r^\star,\ e_{\mathrm{ant}})$}
+  }
+}
+actualizar $K(x)$ y $D(x)$\;
+\end{algorithm}
+
+\begin{algorithm}[H]
+\caption{\fn{Entrada} (\cod{computeEntry})}
+\label{alg:entrada}
+\Entrada{cliente $u$, ruta $r$ con secuencia $\pi$, amplitud de ruido $\nu$}
+\Salida{$e=(\textit{mejor},\ \textit{segundo},\ \textit{pos})$}
+$e\gets(\infty,\infty,-)$\;
+\lSi{$\textit{carga}_r+\mu_u>Q$}{\Devolver $e$}
+\Para{$k\gets 0$ \Hasta $L-2$}{
+  $(\textit{factible},\Delta)\gets$ \fn{EvaluarInserción}($u$, $\pi$, $k$)\;
+  \lSi{$\neg\,\textit{factible}$}{\Continuar}
+  \lSi{$\nu>0$}{$\Delta\gets\max\bigl(0,\ \Delta+\xi\bigr)$ con $\xi\sim\unif{-\nu}{\nu}$}
+  \uSi{$\Delta<e.\textit{mejor}$}{
+    $e.\textit{segundo}\gets e.\textit{mejor}$;\quad $e.\textit{mejor}\gets\Delta$;\quad $e.\textit{pos}\gets k+1$\;
+  }
+  \SiNoSi{$\Delta<e.\textit{segundo}$}{
+    $e.\textit{segundo}\gets\Delta$\;
+  }
+}
+\Devolver $e$\;
+\end{algorithm}
+
+\paragraph{Costo.} La inicialización cuesta $\bigO(U\,n)$ evaluaciones. Cada paso posterior
+recalcula una columna, $\bigO(U\,\bar{L})$, y elige el máximo en $\bigO(U)$. El total es
+\[
+\bigO\bigl(U\,n+U^{2}\,\bar{L}\bigr)\quad\text{frente a}\quad\bigO\bigl(U^{2}\,n\bigr),
+\]
+una reducción por un factor del orden del número de rutas $m=n/\bar{L}$ en el término
+dominante. A esto se suma la actualización de los agregadores, que se analiza a continuación.
+
+\subsection{Ruido en los costos de inserción}
+\label{sec:ruido}
+
+Cuando la bandera \emph{ruido} está activa (lo está en la mitad de las iteraciones,
+Sección~\ref{sec:catalogo}), cada costo de inserción factible se perturba con un término
+aditivo, como en~\cite{ropke2006}:
+\begin{equation}
+\tilde{\Delta}=\max\bigl(0,\ \Delta+\xi\bigr),\qquad \xi\sim\unif{-\nu}{\nu},\qquad
+\nu=0.025\,d_{\max},
+\label{eq:ruido}
+\end{equation}
+donde $d_{\max}$ es la mayor distancia entre dos nodos de la instancia y $0.025$ es la
+constante \cod{NOISE\_RATE}. La amplitud es absoluta, proporcional a la escala geográfica de
+la instancia y no al costo de cada inserción: altera el orden entre inserciones cuya
+diferencia es menor que $2\nu$ y respeta las decisiones claras, de modo que dos reparaciones
+de la misma solución parcial pueden producir resultados distintos. Es el mecanismo de
+diversificación de la reparación, y se aplica por igual a los cinco operadores.
+
+El ruido se sortea al calcular cada entrada (Algoritmo~\ref{alg:entrada}), con un valor
+independiente por posición, y actúa \emph{antes} de seleccionar el mejor y el segundo mejor
+costo de la ruta. En consecuencia afecta a las tres decisiones de la reparación: en qué
+posición de una ruta entraría un cliente, a qué ruta va y en qué orden se insertan los
+clientes. La entrada perturbada se conserva en la caché mientras su ruta no cambie y se
+vuelve a sortear cuando la columna se recalcula. La factibilidad no se perturba: una
+inserción elegida con ruido es siempre factible, y la distancia de la solución se calcula con
+los costos reales.
+
+\subsection{Agregadores y actualización perezosa}
+\label{sec:agregadores}
+
+Reconstruir un agregador exige recorrer su fila, $\bigO(m)$. Hacerlo para todos los clientes
+en cada paso añadiría $\bigO(U^2 m)$. Cada agregador implementa por ello una operación
+\fn{actualizar} que, conocida la entrada anterior y la nueva de la única columna modificada,
+decide en $\bigO(1)$ si el resumen puede haber cambiado y solo en ese caso reconstruye. Además,
+\fn{actualizar} ni siquiera se invoca cuando la entrada recalculada es idéntica a la anterior.
+Las condiciones de salto están escritas de modo que el resultado coincide siempre con el de
+una reconstrucción completa, incluidos los empates.
+
+\paragraph{Inserción voraz (\cod{GreedyAgg}).} Resume la fila en el menor costo y su ruta:
+\[
+c_u=\min_r M[u][r].\textit{mejor},\qquad \textit{clave}=-c_u .
+\]
+Se inserta primero el cliente cuya mejor inserción es la más barata. Actualización: si la
+columna modificada es la ruta óptima actual, se reconstruye; si es otra, basta comparar su
+nuevo costo con $c_u$ (y, en caso de empate, preferir la ruta de menor índice, que es lo que
+elegiría la reconstrucción). Es el criterio más miope: tiende a agotar pronto las inserciones
+baratas y a dejar para el final a los clientes difíciles.
+
+\paragraph{Arrepentimiento 2 (\cod{Regret2Agg}).} Considera los dos menores costos de
+inserción del cliente sobre \emph{todas las posiciones de todas las rutas}, $c^{(1)}_u\le
+c^{(2)}_u$ (pueden pertenecer a la misma ruta; por eso cada entrada de $M$ guarda también el
+segundo mejor costo de la ruta):
+\[
+\textit{clave}=c^{(2)}_u-c^{(1)}_u,\qquad \textit{clave}=10^{9}\ \text{si solo existe una inserción factible.}
+\]
+Se inserta primero el cliente que más perdería si no obtuviera su mejor posición; un cliente
+con una única posición factible tiene prioridad absoluta. Actualización: si la columna
+modificada no es la ruta óptima y tanto su mejor costo anterior como el nuevo superan
+$c^{(2)}_u$, ni $c^{(1)}_u$ ni $c^{(2)}_u$ pueden cambiar y se omite la reconstrucción.
+
+\paragraph{Arrepentimiento $k$ sobre rutas (\cod{RegretAgg<K>}).} Los tres operadores
+restantes comparten un agregador genérico, parametrizado por $k$. Los valores usados son
+$k=3$ (\cod{regret3Insertion}), $k=4$ (\cod{regret4Insertion}) y $k=m$, el número de rutas de
+la solución (\cod{regretMInsertion}, que en el código corresponde a \cod{K = 0}). Es el
+arrepentimiento de~\cite{ropke2006}: considera el mejor costo \emph{por ruta} y ordena las
+rutas factibles, $c^{[1]}_u\le c^{[2]}_u\le c^{[3]}_u\le\dots$ Con
+$h=\min(k,\text{número de rutas factibles})$,
+\begin{equation}
+\textit{clave}=\sum_{l=2}^{h}\bigl(c^{[l]}_u-c^{[1]}_u\bigr)+10^{4}\,(k-h).
+\label{eq:regretk}
+\end{equation}
+El primer término mide cuánto se perdería en total si el cliente tuviera que conformarse con
+su segunda, tercera, \dots, $k$-ésima mejor ruta. El segundo prioriza a los clientes con menos
+de $k$ rutas factibles, con una penalización de $10^4$ por cada ruta que falta. La ruta de
+destino es la de menor costo (la de menor índice en caso de empate).
+
+El agregador conserva, además de la clave y la ruta, el $k$-ésimo menor costo $c^{[k]}_u$
+(o $\infty$ si hay menos de $k$ rutas factibles). Actualización: si el mejor costo de la
+columna modificada no cambió, o si tanto el anterior como el nuevo superan $c^{[k]}_u$, la
+ruta estaba y sigue estando fuera de las $k$ mejores y la clave no cambia; en otro caso se
+reconstruye, con un ordenamiento $\bigO(m\log m)$ sobre un búfer reutilizado para evitar
+reservas de memoria. Para $k=3$ y $k=4$ el salto se aplica siempre que la columna modificada
+no esté entre las $k$ mejores rutas del cliente. Para $k=m$ ninguna ruta factible queda fuera,
+de modo que el agregador se reconstruye siempre que cambia el mejor costo de la columna: el
+arrepentimiento sobre todas las rutas es el operador de reparación más costoso.
+
+\paragraph{Diferencias entre los arrepentimientos.} El arrepentimiento 2 se mide sobre
+posiciones y los demás sobre rutas. El primero es sensible a la diferencia entre las dos
+mejores posiciones aunque estén en la misma ruta, y por tanto prioriza a los clientes cuya
+colocación \emph{exacta} importa; los segundos miden cuántas rutas alternativas tiene
+realmente el cliente y priorizan a los que dependen de pocas rutas. Entre estos, $k$ regula el
+horizonte de anticipación: con $k=3$ o $k=4$ solo cuentan las mejores alternativas, mientras
+que con $k=m$ el término $10^{4}(m-h)$ suele dominar la clave y el operador inserta primero,
+en esencia, a los clientes que caben en \emph{menos} rutas, usando la suma de diferencias
+para desempatar. Frente a la inserción voraz, todos anticipan qué clientes quedarán sin
+alternativas, lo que es especialmente valioso con ventanas de tiempo estrechas y, sobre todo,
+con flota fija: en la fase~1 un cliente que se queda sin ruta factible permanece en el banco
+(Sección~\ref{sec:fases}).
+
+\subsection{Resumen de las optimizaciones}
+
+La Tabla~\ref{tab:optim} reúne las optimizaciones descritas en esta sección y en la anterior.
+Todas son \emph{exactas}: cambian el costo computacional, no la decisión que toma el operador.
+En las reparaciones con ruido, la perturbación forma parte de la definición del operador (se
+sortea una vez por entrada calculada) y la caché no introduce ninguna aproximación adicional.
+
+\begin{table}[!htb]
+\centering
+\small
+\caption{Optimizaciones algorítmicas de los operadores. $U$: clientes por insertar;
+$\bar{L}$: longitud media de ruta; $m$: número de rutas.}
+\label{tab:optim}
+\begin{tabularx}{\textwidth}{@{}l L l l@{}}
+\toprule
+Componente & Técnica & Costo directo & Costo optimizado \\
+\midrule
+Factibilidad de inserción & Llegadas, esperas y holguras por ruta & $\bigO(\bar{L})$ & $\bigO(1)$ \\
+Arcos imposibles & Matriz de alcanzabilidad precalculada & -- & filtro $\bigO(1)$ \\
+Extracción de peores & Lista ordenada incremental; solo se actualizan dos vecinos & $\bigO(q\,n\log n)$ & $\bigO(n\log n+q\,n)^{\dagger}$ \\
+Extracción de Shaw & Orden de afinidad precalculado por instancia & $\bigO(q\,n\log n)$ & $\bigO(q\,n)^{\ddagger}$ \\
+Voraz y arrepentimientos & Caché por (cliente, ruta); solo se recalcula la ruta modificada & $\bigO(U^{2}n)$ & $\bigO(Un+U^{2}\bar{L})$ \\
+Agregadores & Actualización perezosa con prueba $\bigO(1)$ & $\bigO(m)$ por cliente & $\bigO(1)$ habitual$^{\S}$ \\
+Borrado de pendientes & Intercambio con el último elemento & $\bigO(U)$ & $\bigO(1)$ \\
+\bottomrule
+\end{tabularx}
+
+\vspace{2pt}
+\raggedright\footnotesize
+$^{\dagger}$ El término $q\,n$ corresponde a desplazamientos de memoria contigua, con constante muy pequeña.\\
+$^{\ddagger}$ Cota de peor caso del recorrido; en la práctica es mucho menor por el sesgo hacia rangos bajos. Se añade un precálculo único de $\bigO(n^{2}\log n)$.\\
+$^{\S}$ Salvo en el arrepentimiento sobre todas las rutas, que reconstruye su agregador en cada cambio.
+\end{table}
