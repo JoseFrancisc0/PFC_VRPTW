@@ -8,20 +8,20 @@
 #include "../VRPTW Environment/solution.h"
 
 using DestroyOp = void (*)(Solution& sol, int q);
-using RepairOp  = void (*)(Solution& sol, bool allow_new_routes);
+using RepairOp  = void (*)(Solution& sol, bool noise);
 
 void randomRemoval(Solution& sol, int q);
 void routeRemoval(Solution& sol, int q);
 void worstRemoval(Solution& sol, int q);
 void shawRemoval(Solution& sol, int q);
+void clusterRemoval(Solution& sol, int q);
 void timeWindowRemoval(Solution& sol, int q);
 
-void greedyInsertion(Solution& sol, bool allow_new_routes);
-void regret2Insertion(Solution& sol, bool allow_new_routes);
-void regret3Insertion(Solution& sol, bool allow_new_routes);
-void pGreedyInsertion(Solution& sol, bool allow_new_routes);
-
-void smallestRouteElimination(Solution& sol, RepairOp repair);
+void greedyInsertion(Solution& sol, bool noise);
+void regret2Insertion(Solution& sol, bool noise);
+void regret3Insertion(Solution& sol, bool noise);
+void regret4Insertion(Solution& sol, bool noise);
+void regretMInsertion(Solution& sol, bool noise);
 
 extern const int NUM_DESTROY;
 extern const int NUM_REPAIR;

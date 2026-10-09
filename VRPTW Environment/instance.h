@@ -52,6 +52,7 @@ class Instance {
         int capacity;
         std::vector<Client> clients;
         std::vector<std::vector<double>> dist_mat;
+        double max_dist = 0.0;
         std::vector<std::vector<bool>> is_reachable;
 
         mutable std::vector<int> shaw_order;

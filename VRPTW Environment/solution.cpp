@@ -119,6 +119,7 @@ void Solution::generateInitialSolution() {
 }
 
 double cost(const Solution& sol) {
+    const double UNASSIGNED_COST = 1000000.0;
     const double VEHICLE_COST = 10000.0;
-    return (sol.used_vehicles * VEHICLE_COST) + sol.total_distance;
+    return (sol.unassigned.size() * UNASSIGNED_COST) + (sol.used_vehicles * VEHICLE_COST) + sol.total_distance;
 }

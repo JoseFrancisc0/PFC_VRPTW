@@ -336,41 +336,102 @@ void shawRemoval(Solution& sol, int q){
     sol.updateMetrics();
 }
 
-void smallestRouteElimination(Solution& sol, RepairOp repair) {
-    const int EJECTION_BUDGET = 10;
-    const int EJECTION_SHAKE = 3;
+void clusterRemoval(Solution& sol, int q) {
+    struct Edge {
+        double dist;
+        int a;
+        int b;
+    };
 
-    int smallest_idx = -1;
-    size_t min_size = std::numeric_limits<size_t>::max();
+    std::vector<int> active_routes;
+    for (int i = 0; i < sol.routes.size(); ++i)
+        if (sol.routes[i].path.size() > 2)
+            active_routes.push_back(i);
 
-    for (size_t r = 0; r < sol.routes.size(); ++r) {
-        if (sol.routes[r].path.size() > 2 && sol.routes[r].path.size() < min_size) {
-            min_size = sol.routes[r].path.size();
-            smallest_idx = static_cast<int>(r);
+    if (active_routes.empty()) return;
+
+    std::uniform_int_distribution<int> r_distr(0, active_routes.size() - 1);
+    int r_idx = active_routes[r_distr(rng)];
+
+    std::vector<int> removed_clients;
+
+    while (r_idx != -1) {
+        Route& route = sol.routes[r_idx];
+        std::vector<int> members(route.path.begin() + 1, route.path.end() - 1);
+        int k = members.size();
+
+        // Kruskal detenido al quedar dos componentes: los dos clusters de la ruta
+        std::vector<Edge> edges;
+        for (int a = 0; a < k; ++a)
+            for (int b = a + 1; b < k; ++b)
+                edges.push_back({sol.inst.dist_mat[members[a]][members[b]], a, b});
+
+        std::sort(edges.begin(), edges.end(), [](const Edge& x, const Edge& y) {
+            return x.dist < y.dist;
+        });
+
+        std::vector<int> parent(k);
+        for (int m = 0; m < k; ++m) parent[m] = m;
+
+        auto find = [&](int x) {
+            while (parent[x] != x) x = parent[x] = parent[parent[x]];
+            return x;
+        };
+
+        int components = k;
+        for (const Edge& e : edges) {
+            if (components <= 2) break;
+
+            int root_a = find(e.a);
+            int root_b = find(e.b);
+            if (root_a != root_b) {
+                parent[root_a] = root_b;
+                components--;
+            }
+        }
+
+        std::uniform_int_distribution<int> m_distr(0, k - 1);
+        int chosen = find(m_distr(rng));
+
+        std::vector<int> kept = {0};
+        for (int m = 0; m < k; ++m) {
+            if (find(m) == chosen) {
+                removed_clients.push_back(members[m]);
+                sol.unassigned.push_back(members[m]);
+            }
+            else
+                kept.push_back(members[m]);
+        }
+        kept.push_back(0);
+
+        route.path = kept;
+        route.recalculate(sol.inst);
+
+        if (removed_clients.size() >= q) break;
+
+        // Siguiente ruta: la del cliente mas cercano (en otra ruta) a uno ya removido
+        std::uniform_int_distribution<int> s_distr(0, removed_clients.size() - 1);
+        int seed_client = removed_clients[s_distr(rng)];
+
+        int current_r = r_idx;
+        double best_dist = std::numeric_limits<double>::max();
+        r_idx = -1;
+
+        for (int r = 0; r < sol.routes.size(); ++r) {
+            if (r == current_r) continue;
+
+            const Route& other = sol.routes[r];
+            for (int i = 1; i < other.path.size() - 1; ++i) {
+                double d = sol.inst.dist_mat[seed_client][other.path[i]];
+                if (d < best_dist) {
+                    best_dist = d;
+                    r_idx = r;
+                }
+            }
         }
     }
 
-    if (smallest_idx != -1) {
-        Route& route = sol.routes[smallest_idx];
-        for (size_t i = 1; i < route.path.size() - 1; ++i) {
-            sol.unassigned.push_back(route.path[i]);
-        }
-        sol.routes.erase(sol.routes.begin() + smallest_idx);
-    }
     sol.updateMetrics();
-
-    Solution attempt = sol;
-    repair(attempt, false);
-
-    for (int k = 0; !attempt.unassigned.empty() && k < EJECTION_BUDGET; ++k) {
-        randomRemoval(attempt, EJECTION_SHAKE);
-        repair(attempt, false);
-    }
-
-    if (attempt.unassigned.empty())
-        sol = attempt;
-    else
-        repair(sol, true);
 }
 
 void timeWindowRemoval(Solution& sol, int q) {

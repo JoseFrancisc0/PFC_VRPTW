@@ -30,19 +30,7 @@ namespace {
 
 const double INF = std::numeric_limits<double>::max();
 
-const double NOISE = 0.1;
-
-struct RouteInsertion {
-    int route_idx;
-    int insert_pos;
-    double cost;
-};
-
-inline bool routeOpenFor(const Solution& sol, const Client& u_client, const Route& route, bool allow_new_routes) {
-    if (!allow_new_routes && route.path.size() <= 2) return false;
-    if (route.load + u_client.demand > sol.inst.capacity) return false;
-    return true;
-}
+const double NOISE_RATE = 0.025;
 
 template <typename T>
 inline void swapRemove(std::vector<T>& v, size_t idx) {
@@ -57,20 +45,6 @@ inline void commitInsertion(Solution& sol, size_t u_idx, int route_idx, int pos)
     swapRemove(sol.unassigned, u_idx);
 }
 
-inline bool openNewRoute(Solution& sol, bool allow_new_routes) {
-    if (!allow_new_routes) return false;
-
-    if (!sol.routes.empty() && sol.routes.back().path.size() <= 2) {
-        std::cerr << "[!] " << sol.unassigned.size()
-                  << " clientes no pudieron ser insertados de forma factible. \n";
-        return false;
-    }
-
-    sol.routes.push_back(Route());
-    sol.routes.back().recalculate(sol.inst);
-    return true;
-}
-
 struct InsEntry {
     double best = INF;
     double second = INF;
@@ -81,14 +55,18 @@ struct InsEntry {
     }
 };
 
-InsEntry computeEntry(const Solution& sol, int client_id, size_t r, bool allow_new_routes) {
+InsEntry computeEntry(const Solution& sol, int client_id, size_t r, double max_noise) {
     InsEntry e;
     const Route& route = sol.routes[r];
-    if (!routeOpenFor(sol, sol.inst.clients[client_id], route, allow_new_routes)) return e;
+    if (route.load + sol.inst.clients[client_id].demand > sol.inst.capacity) return e;
+
+    std::uniform_real_distribution<double> noise_distr(-max_noise, max_noise);
 
     for (size_t i = 0; i < route.path.size() - 1; ++i) {
         double delta_cost = 0.0;
         if (!evalInsertion(sol, client_id, route, i, delta_cost)) continue;
+
+        if (max_noise > 0.0) delta_cost = std::max(0.0, delta_cost + noise_distr(rng));
 
         if (delta_cost < e.best) {
             e.second = e.best;
@@ -102,13 +80,15 @@ InsEntry computeEntry(const Solution& sol, int client_id, size_t r, bool allow_n
 }
 
 template <typename Agg>
-void cachedInsertion(Solution& sol, bool allow_new_routes) {
+void cachedInsertion(Solution& sol, bool noise) {
+    double max_noise = noise ? NOISE_RATE * sol.inst.max_dist : 0.0;
+
     std::vector<std::vector<InsEntry>> rows(sol.unassigned.size());
     std::vector<Agg> aggs(sol.unassigned.size());
     for (size_t u = 0; u < rows.size(); ++u) {
         rows[u].resize(sol.routes.size());
         for (size_t r = 0; r < sol.routes.size(); ++r)
-            rows[u][r] = computeEntry(sol, sol.unassigned[u], r, allow_new_routes);
+            rows[u][r] = computeEntry(sol, sol.unassigned[u], r, max_noise);
         aggs[u].rebuild(rows[u]);
     }
 
@@ -119,27 +99,19 @@ void cachedInsertion(Solution& sol, bool allow_new_routes) {
             if (best_u == -1 || aggs[u].key() > aggs[best_u].key()) best_u = u;
         }
 
-        if (best_u != -1) {
-            int r = aggs[best_u].route;
-            commitInsertion(sol, best_u, r, rows[best_u][r].pos);
-            swapRemove(rows, best_u);
-            swapRemove(aggs, best_u);
+        // Flota fija: lo que no entra en ninguna ruta queda sin asignar
+        if (best_u == -1) break;
 
-            // Solo cambio la ruta r: se recalcula esa columna
-            for (size_t u = 0; u < rows.size(); ++u) {
-                InsEntry old = rows[u][r];
-                rows[u][r] = computeEntry(sol, sol.unassigned[u], r, allow_new_routes);
-                if (rows[u][r] != old) aggs[u].update(rows[u], r, old);
-            }
-        }
-        else {
-            if (!openNewRoute(sol, allow_new_routes)) break;
+        int r = aggs[best_u].route;
+        commitInsertion(sol, best_u, r, rows[best_u][r].pos);
+        swapRemove(rows, best_u);
+        swapRemove(aggs, best_u);
 
-            size_t r = sol.routes.size() - 1;
-            for (size_t u = 0; u < rows.size(); ++u) {
-                rows[u].push_back(computeEntry(sol, sol.unassigned[u], r, allow_new_routes));
-                aggs[u].rebuild(rows[u]);
-            }
+        // Solo cambio la ruta r: se recalcula esa columna
+        for (size_t u = 0; u < rows.size(); ++u) {
+            InsEntry old = rows[u][r];
+            rows[u][r] = computeEntry(sol, sol.unassigned[u], r, max_noise);
+            if (rows[u][r] != old) aggs[u].update(rows[u], r, old);
         }
     }
 
@@ -214,56 +186,45 @@ struct Regret2Agg {
     double key() const { return regret; }
 };
 
-struct Regret3Agg {
+// Regret-k sobre el mejor costo por ruta; K = 0 es regret-m (todas las rutas)
+template <int K>
+struct RegretAgg {
     double regret = -1.0;
     int route = -1;
 
-    double top[3] = {INF, INF, INF};
-    int count = 0;
+    double kth = INF;
 
     void rebuild(const std::vector<InsEntry>& row) {
-        static thread_local std::vector<RouteInsertion> best_per_route;
-        best_per_route.clear();
-        for (size_t r = 0; r < row.size(); ++r)
-            if (row[r].best != INF)
-                best_per_route.push_back({static_cast<int>(r), row[r].pos, row[r].best});
-
-        count = best_per_route.size();
+        static thread_local std::vector<double> costs;
+        costs.clear();
         route = -1;
-        top[0] = top[1] = top[2] = INF;
-        if (best_per_route.empty()) return;
+        kth = INF;
 
-        std::sort(best_per_route.begin(), best_per_route.end(),
-            [](const RouteInsertion& a, const RouteInsertion& b) {
-                return a.cost < b.cost;
-            });
+        for (size_t r = 0; r < row.size(); ++r) {
+            if (row[r].best == INF) continue;
+            if (route == -1 || row[r].best < row[route].best) route = r;
+            costs.push_back(row[r].best);
+        }
+        if (costs.empty()) return;
 
-        double best_cost = best_per_route[0].cost;
-        regret = 0.0;
+        std::sort(costs.begin(), costs.end());
 
-        int m = std::min(3, count);
-        for (int k = 1; k < m; ++k)
-            regret += (best_per_route[k].cost - best_cost);
+        int k = K > 0 ? K : static_cast<int>(row.size());
+        int m = std::min(k, static_cast<int>(costs.size()));
 
-        int missing_routes = 3 - m;
-        regret += missing_routes * 10000.0;
+        int missing_routes = k - m;
+        regret = missing_routes * 10000.0;
+        for (int j = 1; j < m; ++j)
+            regret += (costs[j] - costs[0]);
 
-        route = best_per_route[0].route_idx;
-        for (int k = 0; k < m; ++k) top[k] = best_per_route[k].cost;
+        if (m == k) kth = costs[k - 1];
     }
 
     void update(const std::vector<InsEntry>& row, size_t r, const InsEntry& old) {
-        double old_cost = old.best;
-        double new_cost = row[r].best;
-        if (new_cost == old_cost) return;
+        if (row[r].best == old.best) return;
 
-        if (count >= 3 && top[0] < top[1] && old_cost > top[2] && new_cost > top[2]) {
-            int new_count = count - (old_cost != INF) + (new_cost != INF);
-            if (new_count >= 3) {
-                count = new_count;
-                return;
-            }
-        }
+        // Una ruta fuera de las k mejores, antes y despues, no cambia el regret
+        if (old.best > kth && row[r].best > kth) return;
         rebuild(row);
     }
 
@@ -271,92 +232,24 @@ struct Regret3Agg {
     double key() const { return regret; }
 };
 
-struct NoisyCand {
-    int route;
-    int pos;
-    double delta;
-};
-
-void appendCands(const Solution& sol, int client_id, size_t r, bool allow_new_routes, std::vector<NoisyCand>& out) {
-    const Route& route = sol.routes[r];
-    if (!routeOpenFor(sol, sol.inst.clients[client_id], route, allow_new_routes)) return;
-
-    for (size_t i = 0; i < route.path.size() - 1; ++i) {
-        double delta_cost = 0.0;
-        if (!evalInsertion(sol, client_id, route, i, delta_cost)) continue;
-        out.push_back({static_cast<int>(r), static_cast<int>(i + 1), delta_cost});
-    }
 }
 
-} 
-
-void greedyInsertion(Solution& sol, bool allow_new_routes){
-    cachedInsertion<GreedyAgg>(sol, allow_new_routes);
+void greedyInsertion(Solution& sol, bool noise){
+    cachedInsertion<GreedyAgg>(sol, noise);
 }
 
-void regret2Insertion(Solution& sol, bool allow_new_routes){
-    cachedInsertion<Regret2Agg>(sol, allow_new_routes);
+void regret2Insertion(Solution& sol, bool noise){
+    cachedInsertion<Regret2Agg>(sol, noise);
 }
 
-void regret3Insertion(Solution& sol, bool allow_new_routes){
-    cachedInsertion<Regret3Agg>(sol, allow_new_routes);
+void regret3Insertion(Solution& sol, bool noise){
+    cachedInsertion<RegretAgg<3>>(sol, noise);
 }
 
-void pGreedyInsertion(Solution& sol, bool allow_new_routes){
-    std::uniform_real_distribution<double> noise_distr(1.0 - NOISE, 1.0 + NOISE);
+void regret4Insertion(Solution& sol, bool noise){
+    cachedInsertion<RegretAgg<4>>(sol, noise);
+}
 
-    std::vector<std::vector<NoisyCand>> rows(sol.unassigned.size());
-    for (size_t u = 0; u < rows.size(); ++u)
-        for (size_t r = 0; r < sol.routes.size(); ++r)
-            appendCands(sol, sol.unassigned[u], r, allow_new_routes, rows[u]);
-
-    std::vector<NoisyCand> fresh;
-
-    while (!sol.unassigned.empty()) {
-        double best_cost = INF;
-        int best_client_idx_in_unassigned = -1;
-        int best_route_idx = -1;
-        int best_insert_pos = -1;
-
-        for (size_t u_idx = 0; u_idx < rows.size(); ++u_idx) {
-            for (const NoisyCand& c : rows[u_idx]) {
-                double perturbed_cost = c.delta * noise_distr(rng);
-                if (perturbed_cost < best_cost) {
-                    best_cost = perturbed_cost;
-                    best_client_idx_in_unassigned = u_idx;
-                    best_route_idx = c.route;
-                    best_insert_pos = c.pos;
-                }
-            }
-        }
-
-        if (best_client_idx_in_unassigned != -1) {
-            commitInsertion(sol, best_client_idx_in_unassigned, best_route_idx, best_insert_pos);
-            swapRemove(rows, best_client_idx_in_unassigned);
-
-            for (size_t u = 0; u < rows.size(); ++u) {
-                std::vector<NoisyCand>& row = rows[u];
-                auto lo = std::lower_bound(row.begin(), row.end(), best_route_idx,
-                    [](const NoisyCand& c, int r) { return c.route < r; });
-                auto hi = std::upper_bound(lo, row.end(), best_route_idx,
-                    [](int r, const NoisyCand& c) { return r < c.route; });
-
-                fresh.clear();
-                appendCands(sol, sol.unassigned[u], best_route_idx, allow_new_routes, fresh);
-
-                size_t at = lo - row.begin();
-                row.erase(lo, hi);
-                row.insert(row.begin() + at, fresh.begin(), fresh.end());
-            }
-        }
-        else {
-            if (!openNewRoute(sol, allow_new_routes)) break;
-
-            size_t r = sol.routes.size() - 1;
-            for (size_t u = 0; u < rows.size(); ++u)
-                appendCands(sol, sol.unassigned[u], r, allow_new_routes, rows[u]);
-        }
-    }
-
-    sol.updateMetrics();
+void regretMInsertion(Solution& sol, bool noise){
+    cachedInsertion<RegretAgg<0>>(sol, noise);
 }

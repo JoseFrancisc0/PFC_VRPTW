@@ -80,6 +80,7 @@ void Instance::precomputeDistances() {
                 double dx = clients[i].x - clients[j].x;
                 double dy = clients[i].y - clients[j].y;
                 dist_mat[i][j] = std::sqrt(dx * dx + dy * dy);
+                max_dist = std::max(max_dist, dist_mat[i][j]);
             }
         }
     }

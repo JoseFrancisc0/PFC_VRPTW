@@ -12,7 +12,7 @@
 unsigned seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
 std::mt19937 rng(seed);
 
-static const std::string DEFAULT_INSTANCE  = "homberger-400/RC1/RC1_4_1.TXT";
+static const std::string DEFAULT_INSTANCE  = "solomon-100/RC1/rc101.txt";
 static const std::string DEFAULT_ALGORITHM = "QLEARNING";  
 static const int         DEFAULT_ITERS     = 25000;
 static const long        DEFAULT_SEED      = 1;      
