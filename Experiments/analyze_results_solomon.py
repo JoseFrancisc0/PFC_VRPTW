@@ -13,11 +13,6 @@ GRAFICOS_DIR = os.path.join(BASE_DIR, "figs", "solomon")
 os.makedirs(TABLAS_DIR, exist_ok=True)
 os.makedirs(GRAFICOS_DIR, exist_ok=True)
 
-# Ponderacion del GAP Unificado: debe ser identica a VEHICLE_COST en
-# "VRPTW Environment/solution.cpp" (funcion cost()), que es lo que ambos
-# solvers realmente optimizan.
-VEHICLE_WEIGHT = 10000
-
 # Maestro por corrida de automate_solomon.py. Opcional: python analyze_results_solomon.py <otro_master.csv>
 MASTER_CSV = sys.argv[1] if len(sys.argv) > 1 else os.path.join(BASE_DIR, "results", "solomon", "master_solomon.csv")
 
@@ -56,15 +51,6 @@ class Logger:
 sys.stdout = Logger(os.path.join(TABLAS_DIR, "conclusiones_comparativas.txt"))
 
 print("=== INICIO DEL ANALISIS DE RESULTADOS ===")
-print(f"""
-Formula del GAP Unificado (misma ponderacion que cost() en el solver C++):
-  Cost(NV, TD)       = {VEHICLE_WEIGHT} * NV + TD
-  GAP_Unificado(%)   = (Cost_Nuestro - Cost_BKS) / Cost_BKS * 100
-Es decir: un vehiculo adicional equivale a {VEHICLE_WEIGHT} unidades de distancia
-en esta metrica. Se reporta junto a GAP_Vehiculos(%) y GAP_Distancia(%), que
-son gaps independientes por objetivo (no ponderados entre si).
-""")
-
 df_res = resumir_master(MASTER_CSV)
 df_res.to_csv(os.path.join(TABLAS_DIR, "resumen_solomon.csv"), index=False)
 print(f"-> Leido {MASTER_CSV}; generada tabla: resumen_solomon.csv con {len(df_res)} registros.")
@@ -86,15 +72,11 @@ def get_class(inst):
 
 df["Clase"] = df["Instancia"].apply(get_class)
 
-df["Cost_Ours"] = df["Avg_Vehiculos"] * VEHICLE_WEIGHT + df["Avg_Distancia"]
-df["Cost_BKS"] = df["BKS_Vehiculos"] * VEHICLE_WEIGHT + df["BKS_Distancia"]
-
 df["GAP_Vehiculos(%)"] = ((df["Avg_Vehiculos"] - df["BKS_Vehiculos"]) / df["BKS_Vehiculos"]) * 100
 df["GAP_Distancia(%)"] = ((df["Avg_Distancia"] - df["BKS_Distancia"]) / df["BKS_Distancia"]) * 100
-df["GAP_Unificado(%)"] = ((df["Cost_Ours"] - df["Cost_BKS"]) / df["Cost_BKS"]) * 100
 
 cols_instancia = ["Instancia", "Clase", "Algoritmo", "Avg_Vehiculos", "Avg_Distancia", 
-                  "BKS_Vehiculos", "BKS_Distancia", "GAP_Vehiculos(%)", "GAP_Distancia(%)", "GAP_Unificado(%)"]
+                  "BKS_Vehiculos", "BKS_Distancia", "GAP_Vehiculos(%)", "GAP_Distancia(%)"]
 df_instancia = df[cols_instancia].copy()
 df_instancia.to_csv(os.path.join(TABLAS_DIR, "gap_por_instancia.csv"), index=False)
 print(f"-> Generada tabla: gap_por_instancia.csv con {len(df_instancia)} registros.")
@@ -140,29 +122,13 @@ for _, row in df_paper_final.iterrows():
     gap_str = f"{gap_bks_nv:+.2f}% / {gap_bks_td:+.2f}%"
     imp_str = f"{imp_alns_nv:+.2f}% / {imp_alns_td:+.2f}%"
 
-    # Gap Unificado: Cost(NV, TD) = VEHICLE_WEIGHT*NV + TD (ver formula impresa
-    # al inicio). A diferencia de las dos columnas de arriba (gaps
-    # independientes por objetivo), esta es la unica que pondera NV contra TD
-    # en un solo numero -- la misma metrica que "cost()" usa para aceptar y
-    # comparar soluciones dentro del solver.
-    cost_bks_row = row["BKS_Vehiculos"] * VEHICLE_WEIGHT + row["BKS_Distancia"]
-    cost_classic_row = classic_nv * VEHICLE_WEIGHT + classic_td
-    cost_ql_row = ql_nv * VEHICLE_WEIGHT + ql_td
-
-    gap_uni_classic = ((cost_classic_row - cost_bks_row) / cost_bks_row) * 100 if cost_bks_row > 0 else 0
-    gap_uni_ql = ((cost_ql_row - cost_bks_row) / cost_bks_row) * 100 if cost_bks_row > 0 else 0
-    imp_uni = ((cost_classic_row - cost_ql_row) / cost_classic_row) * 100 if cost_classic_row > 0 else 0
-
     paper_records.append({
         "Benchmark / Clase": row["Clase"],
         "BKS (NV/TD)": bks_str,
         "Classical ALNS (NV/TD)": classic_str,
         "Proposed RL-ALNS (NV/TD)": ql_str,
         "Gap vs. BKS (NV/TD %)": gap_str,
-        "Imp. vs. ALNS (NV/TD %)": imp_str,
-        "Gap Unificado ALNS vs. BKS (%)": f"{gap_uni_classic:+.2f}%",
-        "Gap Unificado Q-ALNS vs. BKS (%)": f"{gap_uni_ql:+.2f}%",
-        "Imp. Unificado vs. ALNS (%)": f"{imp_uni:+.2f}%"
+        "Imp. vs. ALNS (NV/TD %)": imp_str
     })
 
 avg_bks_nv = df_paper_final["BKS_Vehiculos"].mean()
@@ -180,24 +146,13 @@ imp_alns_td_global = ((avg_classic_td - avg_ql_td) / avg_classic_td) * 100 if av
 gap_str_global = f"{gap_bks_nv_global:+.2f}% / {gap_bks_td_global:+.2f}%"
 imp_str_global = f"{imp_alns_nv_global:+.2f}% / {imp_alns_td_global:+.2f}%"
 
-cost_bks_global = avg_bks_nv * VEHICLE_WEIGHT + avg_bks_td
-cost_classic_global = avg_classic_nv * VEHICLE_WEIGHT + avg_classic_td
-cost_ql_global = avg_ql_nv * VEHICLE_WEIGHT + avg_ql_td
-
-gap_uni_classic_global = ((cost_classic_global - cost_bks_global) / cost_bks_global) * 100 if cost_bks_global > 0 else 0
-gap_uni_ql_global = ((cost_ql_global - cost_bks_global) / cost_bks_global) * 100 if cost_bks_global > 0 else 0
-imp_uni_global = ((cost_classic_global - cost_ql_global) / cost_classic_global) * 100 if cost_classic_global > 0 else 0
-
 paper_records.append({
     "Benchmark / Clase": "Promedio Global",
     "BKS (NV/TD)": fmt_nv_td(avg_bks_nv, avg_bks_td),
     "Classical ALNS (NV/TD)": fmt_nv_td(avg_classic_nv, avg_classic_td),
     "Proposed RL-ALNS (NV/TD)": fmt_nv_td(avg_ql_nv, avg_ql_td),
     "Gap vs. BKS (NV/TD %)": gap_str_global,
-    "Imp. vs. ALNS (NV/TD %)": imp_str_global,
-    "Gap Unificado ALNS vs. BKS (%)": f"{gap_uni_classic_global:+.2f}%",
-    "Gap Unificado Q-ALNS vs. BKS (%)": f"{gap_uni_ql_global:+.2f}%",
-    "Imp. Unificado vs. ALNS (%)": f"{imp_uni_global:+.2f}%"
+    "Imp. vs. ALNS (NV/TD %)": imp_str_global
 })
 
 df_paper_out = pd.DataFrame(paper_records)
@@ -207,8 +162,7 @@ print(f"-> Generada tabla: tabla_paper_format.csv (Formato RL-ALNS).")
 print("\n--- TABLA PRINCIPAL DE RESULTADOS (FORMATO PAPER) ---")
 headers = df_paper_out.columns.tolist()
 # Ancho por columna calculado a partir del contenido real (encabezado o mayor
-# valor), en vez de un formato fijo: con 9 columnas un ancho fijo se desalinea
-# apenas cambia un valor.
+# valor), en vez de un formato fijo, que se desalinea apenas cambia un valor.
 col_widths = {h: max(len(h), df_paper_out[h].astype(str).map(len).max()) for h in headers}
 header_format = " | ".join(f"{{:<{col_widths[h]}}}" for h in headers)
 sep_len = sum(col_widths.values()) + 3 * (len(headers) - 1)
@@ -231,7 +185,6 @@ for _, row in df.iterrows():
     clase = row["Clase"]
     bks_veh = row["BKS_Vehiculos"]
     bks_dist = row["BKS_Distancia"]
-    cost_bks = row["Cost_BKS"]
     
     for i in run_ids:
         col_veh = f"Veh_Run{i}"
@@ -239,10 +192,8 @@ for _, row in df.iterrows():
         if col_veh in row and pd.notna(row[col_veh]) and row[col_veh] != "":
             veh = float(row[col_veh])
             dist = float(row[col_dist])
-            cost_ours = veh * VEHICLE_WEIGHT + dist
             gap_veh = ((veh - bks_veh) / bks_veh) * 100 if bks_veh > 0 else 0
             gap_dist = ((dist - bks_dist) / bks_dist) * 100 if bks_dist > 0 else 0
-            gap_uni = ((cost_ours - cost_bks) / cost_bks) * 100 if cost_bks > 0 else 0
             
             runs_data.append({
                 "Instancia": inst,
@@ -252,8 +203,7 @@ for _, row in df.iterrows():
                 "Veh": veh,
                 "Dist": dist,
                 "GAP_Vehiculos(%)": gap_veh,
-                "GAP_Distancia(%)": gap_dist,
-                "GAP_Unificado(%)": gap_uni
+                "GAP_Distancia(%)": gap_dist
             })
 
 df_melted = pd.DataFrame(runs_data)
@@ -290,12 +240,10 @@ def generate_scatter(val_col, title, filename):
     plt.close()
 
 # Barras -> Boxplots
-generate_boxplot("GAP_Unificado(%)", "Comparacion de GAP Unificado Promedio por Clase de Instancia (Boxplot)", "boxplot_gap_unificado.png")
 generate_boxplot("GAP_Vehiculos(%)", "Comparacion de GAP Vehiculos Promedio por Clase de Instancia (Boxplot)", "boxplot_gap_vehiculos.png")
 generate_boxplot("GAP_Distancia(%)", "Comparacion de GAP Distancia Promedio por Clase de Instancia (Boxplot)", "boxplot_gap_distancia.png")
 
 # Dispersiones
-generate_scatter("GAP_Unificado(%)", "Dispersion de GAP Unificado: ALNS vs Q-Learning", "scatter_gap_unificado.png")
 generate_scatter("GAP_Vehiculos(%)", "Dispersion de GAP Vehiculos: ALNS vs Q-Learning", "scatter_gap_vehiculos.png")
 generate_scatter("GAP_Distancia(%)", "Dispersion de GAP Distancia: ALNS vs Q-Learning", "scatter_gap_distancia.png")
 

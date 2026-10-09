@@ -16,10 +16,13 @@ class ALNS_QLearning : public ALNS {
         int action = 0;
         double epsilon = 1.0;
 
-        double opportunity_cost = 0.0;
+        int explore_until;
+
+        std::vector<double> recent_improvement;
 
         std::pair<int, int> selectOperators(int iter) override;
         void learn(int iter, const Outcome& outcome) override;
+        void onDistancePhase(int iter) override;
         double shapeImprovement(double relative_gain) const;
 };
 

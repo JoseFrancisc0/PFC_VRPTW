@@ -28,6 +28,9 @@ class ALNS {
 
         virtual void learn(int iter, const Outcome& outcome) = 0;
 
+        // Aviso de que en iter empieza la fase 2 (el objetivo pasa de rutas a distancia)
+        virtual void onDistancePhase(int iter) {}
+
     private:
         Solution current_sol;
         Solution best_sol;
