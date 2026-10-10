@@ -121,7 +121,8 @@ Solution ALNS::solve(int _max_iters) {
         if (iters_since_best >= STAGNATION_LIMIT) {
             current_sol = best_sol;
             curr_cost = best_cost;
-            T = start_temp * REHEAT_FACTOR;
+            // Solo la fase 1 recalienta: en la fase 2 impediria que la temperatura baje
+            if (route_phase) T = start_temp * REHEAT_FACTOR;
             iters_since_best = 0;
         }
 

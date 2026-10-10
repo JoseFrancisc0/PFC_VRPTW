@@ -3,7 +3,7 @@
 ### Codigo del solver (C++)
 * `VRPTW Environment/`: instancia, rutas y clase `Solution`
 * `Operators/`: operadores de destruccion y reparacion; `operators.cpp` define el pool compartido y el grado de destruccion
-* `ALNS/`: `alns.cpp` (bucle comun en dos fases: minimizacion de rutas y luego de distancia, con SA y reinicio por estancamiento), `alns_classic.cpp` (seleccion por ruleta) y `alns_qlearning.cpp` (seleccion por Q-learning)
+* `ALNS/`: `alns.cpp` (bucle comun en dos fases: minimizacion de rutas y luego de distancia, con SA y reinicio por estancamiento, que recalienta solo en la fase de rutas), `alns_classic.cpp` (seleccion por ruleta) y `alns_qlearning.cpp` (seleccion por Q-learning)
 * `Utils/`: verificador de soluciones y `params.h` (parametros `clave=valor` en tiempo de ejecucion)
 * `main.cpp`: `ALNS_VRPTW.exe <instancia> <CLASSIC|QLEARNING> <iters> [semilla] [clave=valor ...]`.
   `<iters>` son las iteraciones de la fase 2 (distancia); la fase 1 (rutas) usa a lo sumo otras tantas.

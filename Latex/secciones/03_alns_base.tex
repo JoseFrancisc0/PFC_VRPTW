@@ -36,7 +36,8 @@ $t\gets 1$\;
   \lSi{$o.\textit{nuevoMejor}$}{$\xbest\gets x'$}
   $\textit{estanc}\gets 0$ si $o.\textit{nuevoMejor}$; si no, $\textit{estanc}+1$\;
   \Si(\Com*[f]{reinicio por estancamiento}){$\textit{estanc}\ge L_{\mathrm{est}}$}{
-    $x\gets\xbest$;\quad $T\gets\rho\,T_0$;\quad $\textit{estanc}\gets 0$\;
+    $x\gets\xbest$;\quad $\textit{estanc}\gets 0$\;
+    \lSi{$\textit{fase1}$}{$T\gets\rho\,T_0$}
   }
   \fn{Aprender}($t$, $o$)\;
   $T\gets c\,T$ \Com*[r]{enfriamiento geométrico}
@@ -87,7 +88,7 @@ Constante & Símbolo & Valor & Función \\
 \cod{TEMP\_SCALE} & $w$ & $0.2$ & Empeoramiento relativo aceptado con probabilidad $0.5$ en $T_0$ \\
 \cod{COOLING\_RATE} & $c$ & $0.9995$ & Factor de enfriamiento por iteración \\
 \cod{STAGNATION\_LIMIT} & $L_{\mathrm{est}}$ & $1500$ & Iteraciones sin nuevo mejor que disparan el reinicio \\
-\cod{REHEAT\_FACTOR} & $\rho$ & $0.5$ & Fracción de $T_0$ a la que se recalienta \\
+\cod{REHEAT\_FACTOR} & $\rho$ & $0.5$ & Fracción de $T_0$ a la que recalienta el reinicio (solo en la fase~1) \\
 \cod{ROUTE\_PHASE\_BANK} & $B$ & $5$ & Clientes sin asignar a partir de los cuales puede abandonarse un intento de la fase~1 \\
 \cod{ROUTE\_PHASE\_STALL} & $L_{\mathrm{rut}}$ & $2000$ & Iteraciones sin reducir los clientes sin asignar que disparan ese abandono \\
 \cod{Q\_MIN\_RATIO} / \cod{Q\_MAX\_RATIO} & -- & $0.10$ / $0.40$ & Fracción mínima y máxima de clientes extraídos \\
@@ -223,26 +224,41 @@ cliente más sin asignar es $2^{-5\cdot 10^{6}/D(x_0)}$, despreciable en todos l
 instancia considerados.
 
 \paragraph{Enfriamiento.} Tras cada iteración $T\gets c\,T$ con $c=0.9995$. La temperatura
-se reduce a la mitad cada $\ln 0.5/\ln c\approx 1386$ iteraciones y, sin recalentamientos,
-al cabo de las $25\,000$ iteraciones de la fase~2 valdría
-$c^{25000}\,T_0\approx 3.7\cdot 10^{-6}\,T_0$, es decir, un descenso prácticamente puro.
+se reduce a la mitad cada $\ln 0.5/\ln c\approx 1386$ iteraciones. En la fase~2, donde no hay
+recalentamientos, al cabo de sus $25\,000$ iteraciones vale
+$c^{25000}\,T_0\approx 3.7\cdot 10^{-6}\,T_0$: la fase termina en un descenso prácticamente
+puro.
 
 \paragraph{Reinicio por estancamiento.} Si transcurren $L_{\mathrm{est}}=1500$ iteraciones
 consecutivas sin un nuevo mejor, la búsqueda vuelve a la mejor solución conocida
-($x\gets\xbest$) y la temperatura se fija en $\rho\,T_0=0.5\,T_0$. El reinicio combina dos
-efectos: \emph{intensificación}, porque descarta la deriva acumulada y retoma el mejor punto
-conocido, y \emph{diversificación}, porque el recalentamiento vuelve a permitir empeoramientos.
-Una consecuencia cuantitativa es que, en un periodo prolongado de estancamiento, la
-temperatura oscila de forma periódica dentro del intervalo
+($x\gets\xbest$). Este retorno es un mecanismo de \emph{intensificación}, porque descarta la
+deriva acumulada y retoma el mejor punto conocido, y actúa igual en las dos fases. Lo que
+ocurre con la temperatura, en cambio, depende de la fase.
+
+En la fase~1 el reinicio además \emph{recalienta}: la temperatura se fija en
+$\rho\,T_0=0.5\,T_0$, lo que vuelve a permitir empeoramientos (\emph{diversificación}). En un
+periodo prolongado de estancamiento la temperatura oscila entonces de forma periódica dentro
+del intervalo
 \[
 \bigl[\rho\,c^{L_{\mathrm{est}}}\,T_0,\ \rho\,T_0\bigr]\approx[\,0.236\,T_0,\ 0.5\,T_0\,],
 \]
-y nunca llega a congelarse. La temperatura solo desciende por debajo de esa banda mientras se
-sigan encontrando nuevos mejores con una separación menor que $L_{\mathrm{est}}$ iteraciones.
-El mecanismo actúa igual en las dos fases. En la fase~1, «nuevo mejor» es cualquier descenso
-de $f$ dentro de la etapa, incluidas las mejoras de distancia a igualdad de banco; por eso el
+y nunca llega a congelarse; solo desciende por debajo de esa banda mientras se sigan
+encontrando nuevos mejores con una separación menor que $L_{\mathrm{est}}$ iteraciones. Es el
+comportamiento buscado en esta fase: el objetivo es vaciar el banco, la distancia del intento
+no se conserva (la fase~2 parte de $\bar{x}$) y son precisamente los empeoramientos de
+distancia aceptados los que reordenan las rutas hasta que los clientes pendientes encuentran
+hueco (Sección~\ref{sec:aceptacion}). En la fase~1, «nuevo mejor» es cualquier descenso de $f$
+dentro de la etapa, incluidas las mejoras de distancia a igualdad de banco; por eso el
 abandono de un intento no se decide con este contador sino con uno propio
 ($\textit{sinBanco}$), que solo atiende al número de clientes pendientes.
+
+En la fase~2 el reinicio \emph{no modifica la temperatura}, que sigue el enfriamiento
+geométrico sin interrupciones. Un recalentamiento mantendría la temperatura en la banda
+anterior, muy por encima de la variación de costo de una iteración: $T_0$ es proporcional a la
+distancia total $D(x_0)$, mientras que una iteración solo modifica a lo sumo $60$ clientes. A
+esa temperatura casi cualquier empeoramiento de distancia se acepta y la búsqueda no llega a
+intensificar. El efecto se agrava con el tamaño de la instancia, porque $D(x_0)$ crece con $n$
+y el tamaño del vecindario no (Sección~\ref{sec:catalogo}).
 
 El contador de estancamiento se actualiza \emph{antes} de \fn{Aprender}, pero el resultado $o$
 que recibe el mecanismo de aprendizaje es el de la iteración recién evaluada y no se ve

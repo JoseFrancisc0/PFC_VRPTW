@@ -30,10 +30,12 @@ grupos, rutas), específicos de las ventanas de tiempo y con anticipación (arre
 3, 4 y sobre todas las rutas). El ruido en los costos de inserción, activo en la mitad de las
 iteraciones, diversifica cualquiera de las reparaciones.
 \item \textbf{Recocido con reinicios.} La temperatura proporcional a la distancia inicial,
-el enfriamiento geométrico y el retorno a la mejor solución con recalentamiento a
-$0.5\,T_0$ tras $1500$ iteraciones sin progreso evitan que la búsqueda se congele en los
-periodos de estancamiento. La temperatura vuelve a $T_0$ al comenzar cada etapa de la fase~1
-y al comenzar la fase~2.
+el enfriamiento geométrico y el retorno a la mejor solución tras $1500$ iteraciones sin
+progreso se aplican en las dos fases. En la fase~1 ese retorno recalienta además a
+$0.5\,T_0$, lo que evita que la búsqueda se congele mientras intenta vaciar el banco; en la
+fase~2 no hay recalentamiento y la temperatura desciende sin interrupciones hasta un descenso
+prácticamente puro. La temperatura vuelve a $T_0$ al comenzar cada etapa de la fase~1 y al
+comenzar la fase~2.
 \item \textbf{Eficiencia por iteración.} La evaluación de inserciones en tiempo constante, las
 cachés por ruta y las estructuras incrementales de los operadores de destrucción reducen el
 costo de la reparación en un factor del orden del número de rutas. Al ser optimizaciones
