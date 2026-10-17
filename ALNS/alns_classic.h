@@ -25,7 +25,7 @@ class ALNS_Classic : public ALNS {
         int d_idx = 0;
         int r_idx = 0;
 
-        std::pair<int, int> selectOperators(int iter) override;
+        Move selectOperators(int iter) override;
         void learn(int iter, const Outcome& outcome) override;
 };
 

@@ -5,13 +5,12 @@
 #include <stdexcept>
 
 struct SolverParams {
-    double alpha = 0.5; 
-    double gamma = 0.7; 
-    double epsilon_min = 0.01; 
-    double beta = 0.99; 
-    int learning_loop = 200;
+    double alpha = 0.1;
+    double gamma = 0.8;
+    double epsilon_min = 0.1;
+    int episode_len = 50;         // iteraciones por decision del agente
+    double learning_loop = 0.05;  // fraccion de los episodios de cada fase con exploracion pura
     double eta = 0.8;
-    double reward_gain = 1.0e4; 
 
     void set(const std::string& kv) {
         size_t eq = kv.find('=');
@@ -22,10 +21,9 @@ struct SolverParams {
         if      (k == "alpha")            alpha = std::stod(v);
         else if (k == "gamma")            gamma = std::stod(v);
         else if (k == "epsilon_min")      epsilon_min = std::stod(v);
-        else if (k == "beta")             beta = std::stod(v);
-        else if (k == "learning_loop")    learning_loop = std::stoi(v);
+        else if (k == "episode_len")      episode_len = std::stoi(v);
+        else if (k == "learning_loop")    learning_loop = std::stod(v);
         else if (k == "eta")              eta = std::stod(v);
-        else if (k == "reward_gain")      reward_gain = std::stod(v);
         else throw std::runtime_error("Parametro desconocido: " + k);
     }
 };

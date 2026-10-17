@@ -17,18 +17,6 @@ int vehicleLowerBound(const Instance& inst) {
     return static_cast<int>(std::ceil(total_demand / inst.capacity));
 }
 
-// Mejora relativa de cand sobre ref en el primer criterio en que difieren:
-// clientes sin asignar, vehiculos o distancia (el mismo orden que impone cost())
-double relativeGain(const Solution& ref, const Solution& cand) {
-    if (cand.unassigned.size() != ref.unassigned.size())
-        return std::max(0.0, (static_cast<double>(ref.unassigned.size()) - cand.unassigned.size()) / ref.unassigned.size());
-
-    if (cand.used_vehicles != ref.used_vehicles)
-        return std::max(0.0, static_cast<double>(ref.used_vehicles - cand.used_vehicles) / ref.used_vehicles);
-
-    return std::max(0.0, (ref.total_distance - cand.total_distance) / ref.total_distance);
-}
-
 // Quita la ruta con menos clientes y los deja sin asignar
 void removeSmallestRoute(Solution& sol) {
     std::vector<Route>& routes = sol.routes;
@@ -45,6 +33,16 @@ void removeSmallestRoute(Solution& sol) {
 
 }
 
+double relativeGain(const Solution& ref, const Solution& cand) {
+    if (cand.unassigned.size() != ref.unassigned.size())
+        return std::max(0.0, (static_cast<double>(ref.unassigned.size()) - cand.unassigned.size()) / ref.unassigned.size());
+
+    if (cand.used_vehicles != ref.used_vehicles)
+        return std::max(0.0, static_cast<double>(ref.used_vehicles - cand.used_vehicles) / ref.used_vehicles);
+
+    return std::max(0.0, (ref.total_distance - cand.total_distance) / ref.total_distance);
+}
+
 ALNS::ALNS(const Solution& _initial_sol, const SolverParams& _params)
     : params(_params), current_sol(_initial_sol), best_sol(_initial_sol) {}
 
@@ -59,8 +57,8 @@ bool ALNS::accept(double cand_cost, double curr_cost, double temp) {
 
 Solution ALNS::solve(int _max_iters) {
     // La fase 1 usa a lo sumo _max_iters iteraciones; la fase 2, siempre _max_iters
-    const int route_phase_limit = _max_iters;
-    max_iters = 2 * _max_iters;
+    phase_iters = _max_iters;
+    int max_iters = 2 * _max_iters;
 
     const double start_temp = -(TEMP_SCALE * current_sol.total_distance) / std::log(0.5);
     const int min_vehicles = vehicleLowerBound(current_sol.inst);
@@ -74,7 +72,7 @@ Solution ALNS::solve(int _max_iters) {
 
     // Fase 1: arranca de feasible_sol con una ruta menos. Fase 2: de feasible_sol tal cual.
     auto startStage = [&](int iter) {
-        route_phase = route_phase && iter < route_phase_limit && feasible_sol.used_vehicles > min_vehicles;
+        route_phase = route_phase && iter < phase_iters && feasible_sol.used_vehicles > min_vehicles;
         if (!route_phase) {
             max_iters = iter + _max_iters;
             onDistancePhase(iter);
@@ -95,18 +93,17 @@ Solution ALNS::solve(int _max_iters) {
     for (int iter = 1; iter <= max_iters; ++iter) {
         Solution candidate = current_sol;
 
-        auto [d_idx, r_idx] = selectOperators(iter);
-        applyOperators(candidate, d_idx, r_idx);
+        Move move = selectOperators(iter);
+        applyOperators(candidate, move.destroy, move.repair, move.perturb);
 
         double cand_cost = cost(candidate);
         size_t prev_bank = best_sol.unassigned.size();
 
         Outcome outcome;
-        outcome.gain_best    = relativeGain(best_sol, candidate);
-        outcome.gain_current = relativeGain(current_sol, candidate);
+        outcome.gain_best = relativeGain(best_sol, candidate);
         outcome.new_best = cand_cost < best_cost;
         outcome.improved = outcome.new_best || cand_cost < curr_cost;
-        outcome.accepted = outcome.improved || accept(cand_cost, curr_cost, T);
+        outcome.accepted = move.perturb || outcome.improved || accept(cand_cost, curr_cost, T);
 
         if (outcome.accepted) {
             current_sol = candidate;
@@ -140,7 +137,7 @@ Solution ALNS::solve(int _max_iters) {
             feasible_sol = best_sol;
             startStage(iter);
         }
-        else if (iter >= route_phase_limit ||
+        else if (iter >= phase_iters ||
                  (bank >= ROUTE_PHASE_BANK && iters_since_bank >= ROUTE_PHASE_STALL)) {
             route_phase = false;
             startStage(iter);

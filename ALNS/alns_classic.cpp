@@ -38,10 +38,10 @@ void ALNS_Classic::Roulette::closeSegment() {
     }
 }
 
-std::pair<int, int> ALNS_Classic::selectOperators(int) {
+Move ALNS_Classic::selectOperators(int) {
     d_idx = destroy.select();
     r_idx = repair.select();
-    return {d_idx, r_idx};
+    return {d_idx, r_idx, false};
 }
 
 void ALNS_Classic::learn(int iter, const Outcome& outcome) {

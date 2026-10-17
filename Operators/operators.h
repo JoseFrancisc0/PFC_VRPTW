@@ -26,6 +26,7 @@ void regretMInsertion(Solution& sol, bool noise);
 extern const int NUM_DESTROY;
 extern const int NUM_REPAIR;
 
-void applyOperators(Solution& sol, int destroy_idx, int repair_idx);
+// Con perturb, el grado de destruccion pasa al rango amplio [q_max, min(2 q_max, n/2)]
+void applyOperators(Solution& sol, int destroy_idx, int repair_idx, bool perturb);
 
 #endif //OPERATORS_H

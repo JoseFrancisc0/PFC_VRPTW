@@ -33,10 +33,15 @@ const double NOISE_PROB = 0.5;
 const int NUM_DESTROY = std::size(DESTROY_OPS);
 const int NUM_REPAIR  = std::size(REPAIR_OPS);
 
-void applyOperators(Solution& sol, int destroy_idx, int repair_idx) {
+void applyOperators(Solution& sol, int destroy_idx, int repair_idx, bool perturb) {
     int n_customers = sol.inst.clients.size() - 1;
     int q_min = std::max(Q_MIN_FLOOR, std::min(Q_MIN_CAP, static_cast<int>(Q_MIN_RATIO * n_customers)));
     int q_max = std::max(q_min + 1, std::min(Q_MAX_CAP, static_cast<int>(Q_MAX_RATIO * n_customers)));
+
+    if (perturb) {
+        q_min = q_max;
+        q_max = std::max(q_max + 1, std::min(2 * q_max, n_customers / 2));
+    }
 
     std::uniform_int_distribution<int> q_distr(q_min, q_max);
     int q = q_distr(rng);

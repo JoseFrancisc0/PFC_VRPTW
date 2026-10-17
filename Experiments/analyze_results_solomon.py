@@ -5,6 +5,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 
+try:
+    from scipy.stats import wilcoxon
+except ImportError:
+    wilcoxon = None
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Misma organizacion que Homberger: results/ = crudo por corrida (automate),
 # summary/ = tablas agregadas, figs/ = graficos (ambos generados aca).
@@ -16,12 +21,16 @@ os.makedirs(GRAFICOS_DIR, exist_ok=True)
 # Maestro por corrida de automate_solomon.py. Opcional: python analyze_results_solomon.py <otro_master.csv>
 MASTER_CSV = sys.argv[1] if len(sys.argv) > 1 else os.path.join(BASE_DIR, "results", "solomon", "master_solomon.csv")
 
+# Orden y nombre de cada algoritmo en tablas y graficos; solo se usan los presentes en el maestro
+ETIQUETAS = {"CLASSIC": "Classical ALNS", "QLEARNING": "Proposed RL-ALNS"}
+ORDEN_CLASES = ["C1", "C2", "R1", "R2", "RC1", "RC2"]
+
 
 def resumir_master(master_csv):
     """Maestro por corrida -> una fila por (instancia, algoritmo), en el formato
     ancho que usa el resto del analisis (Avg_*, Best_*, Veh_RunK, Dist_RunK)."""
     m = pd.read_csv(master_csv)
-    m = m[m["valid"] == 1]
+    m = m[(m["valid"] == 1) & m["algorithm"].isin(ETIQUETAS)]
     filas = []
     for (inst, algo), g in m.groupby(["instance", "algorithm"]):
         best = g.sort_values(["best_veh", "best_dist"]).iloc[0]
@@ -66,6 +75,10 @@ if len(df) == 0:
     print("Error: No se pudieron cruzar las instancias.")
     sys.exit(1)
 
+ALGOS = [a for a in ETIQUETAS if a in set(df["Algoritmo"])]
+df = df[df["Algoritmo"].isin(ALGOS)].copy()
+print(f"-> Algoritmos en el maestro: {', '.join(ALGOS)}")
+
 def get_class(inst):
     if inst.startswith('rc'): return inst[:3].upper()
     return inst[:2].upper()
@@ -75,13 +88,13 @@ df["Clase"] = df["Instancia"].apply(get_class)
 df["GAP_Vehiculos(%)"] = ((df["Avg_Vehiculos"] - df["BKS_Vehiculos"]) / df["BKS_Vehiculos"]) * 100
 df["GAP_Distancia(%)"] = ((df["Avg_Distancia"] - df["BKS_Distancia"]) / df["BKS_Distancia"]) * 100
 
-cols_instancia = ["Instancia", "Clase", "Algoritmo", "Avg_Vehiculos", "Avg_Distancia", 
+cols_instancia = ["Instancia", "Clase", "Algoritmo", "Avg_Vehiculos", "Avg_Distancia",
                   "BKS_Vehiculos", "BKS_Distancia", "GAP_Vehiculos(%)", "GAP_Distancia(%)"]
 df_instancia = df[cols_instancia].copy()
 df_instancia.to_csv(os.path.join(TABLAS_DIR, "gap_por_instancia.csv"), index=False)
 print(f"-> Generada tabla: gap_por_instancia.csv con {len(df_instancia)} registros.")
 
-# --- NUEVA TABLA FORMATO PAPER ---
+# --- TABLA FORMATO PAPER ---
 df_paper = df.groupby(["Clase", "Algoritmo"]).agg({
     "Avg_Vehiculos": "mean",
     "Avg_Distancia": "mean"
@@ -94,84 +107,98 @@ df_paper_pivot.reset_index(inplace=True)
 bks_df = df.groupby("Clase").agg({"BKS_Vehiculos": "mean", "BKS_Distancia": "mean"}).reset_index()
 df_paper_final = pd.merge(bks_df, df_paper_pivot, on="Clase")
 
-cat_type = pd.CategoricalDtype(categories=["C1", "C2", "R1", "R2", "RC1", "RC2"], ordered=True)
+cat_type = pd.CategoricalDtype(categories=ORDEN_CLASES, ordered=True)
 df_paper_final["Clase"] = df_paper_final["Clase"].astype(cat_type)
 df_paper_final = df_paper_final.sort_values("Clase")
 
 def fmt_nv_td(nv, td):
     return f"{nv:.2f} / {td:.2f}"
 
+def fmt_pct(nv, td):
+    return f"{nv:+.2f}% / {td:+.2f}%"
+
+def mejora(ref, new):
+    """Mejora relativa (%) de new sobre ref; positiva si new es menor."""
+    return ((ref - new) / ref) * 100 if ref > 0 else 0
+
+def fila_paper(clase, nv_td):
+    """nv_td: algoritmo -> (NV, TD), con 'BKS' incluido."""
+    bks_nv, bks_td = nv_td["BKS"]
+    rec = {"Benchmark / Clase": clase, "BKS (NV/TD)": fmt_nv_td(bks_nv, bks_td)}
+    for a in ALGOS:
+        rec[f"{ETIQUETAS[a]} (NV/TD)"] = fmt_nv_td(*nv_td[a])
+    if "QLEARNING" in ALGOS:
+        ql_nv, ql_td = nv_td["QLEARNING"]
+        rec["Gap vs. BKS (NV/TD %)"] = fmt_pct((ql_nv - bks_nv) / bks_nv * 100, (ql_td - bks_td) / bks_td * 100)
+        if "CLASSIC" in ALGOS:
+            cl_nv, cl_td = nv_td["CLASSIC"]
+            rec["Imp. vs. ALNS (NV/TD %)"] = fmt_pct(mejora(cl_nv, ql_nv), mejora(cl_td, ql_td))
+    return rec
+
 paper_records = []
 for _, row in df_paper_final.iterrows():
-    bks_str = fmt_nv_td(row["BKS_Vehiculos"], row["BKS_Distancia"])
-    
-    classic_nv = row.get("Avg_Vehiculos_CLASSIC", row["BKS_Vehiculos"])
-    classic_td = row.get("Avg_Distancia_CLASSIC", row["BKS_Distancia"])
-    ql_nv = row.get("Avg_Vehiculos_QLEARNING", row["BKS_Vehiculos"])
-    ql_td = row.get("Avg_Distancia_QLEARNING", row["BKS_Distancia"])
-    
-    classic_str = fmt_nv_td(classic_nv, classic_td)
-    ql_str = fmt_nv_td(ql_nv, ql_td)
-    
-    gap_bks_nv = ((ql_nv - row["BKS_Vehiculos"]) / row["BKS_Vehiculos"]) * 100 if row["BKS_Vehiculos"] > 0 else 0
-    gap_bks_td = ((ql_td - row["BKS_Distancia"]) / row["BKS_Distancia"]) * 100 if row["BKS_Distancia"] > 0 else 0
-    
-    imp_alns_nv = ((classic_nv - ql_nv) / classic_nv) * 100 if classic_nv > 0 else 0
-    imp_alns_td = ((classic_td - ql_td) / classic_td) * 100 if classic_td > 0 else 0
-    
-    gap_str = f"{gap_bks_nv:+.2f}% / {gap_bks_td:+.2f}%"
-    imp_str = f"{imp_alns_nv:+.2f}% / {imp_alns_td:+.2f}%"
+    nv_td = {"BKS": (row["BKS_Vehiculos"], row["BKS_Distancia"])}
+    for a in ALGOS:
+        nv_td[a] = (row[f"Avg_Vehiculos_{a}"], row[f"Avg_Distancia_{a}"])
+    paper_records.append(fila_paper(row["Clase"], nv_td))
 
-    paper_records.append({
-        "Benchmark / Clase": row["Clase"],
-        "BKS (NV/TD)": bks_str,
-        "Classical ALNS (NV/TD)": classic_str,
-        "Proposed RL-ALNS (NV/TD)": ql_str,
-        "Gap vs. BKS (NV/TD %)": gap_str,
-        "Imp. vs. ALNS (NV/TD %)": imp_str
-    })
-
-avg_bks_nv = df_paper_final["BKS_Vehiculos"].mean()
-avg_bks_td = df_paper_final["BKS_Distancia"].mean()
-avg_classic_nv = df_paper_final.get("Avg_Vehiculos_CLASSIC", df_paper_final["BKS_Vehiculos"]).mean()
-avg_classic_td = df_paper_final.get("Avg_Distancia_CLASSIC", df_paper_final["BKS_Distancia"]).mean()
-avg_ql_nv = df_paper_final.get("Avg_Vehiculos_QLEARNING", df_paper_final["BKS_Vehiculos"]).mean()
-avg_ql_td = df_paper_final.get("Avg_Distancia_QLEARNING", df_paper_final["BKS_Distancia"]).mean()
-
-gap_bks_nv_global = ((avg_ql_nv - avg_bks_nv) / avg_bks_nv) * 100 if avg_bks_nv > 0 else 0
-gap_bks_td_global = ((avg_ql_td - avg_bks_td) / avg_bks_td) * 100 if avg_bks_td > 0 else 0
-imp_alns_nv_global = ((avg_classic_nv - avg_ql_nv) / avg_classic_nv) * 100 if avg_classic_nv > 0 else 0
-imp_alns_td_global = ((avg_classic_td - avg_ql_td) / avg_classic_td) * 100 if avg_classic_td > 0 else 0
-
-gap_str_global = f"{gap_bks_nv_global:+.2f}% / {gap_bks_td_global:+.2f}%"
-imp_str_global = f"{imp_alns_nv_global:+.2f}% / {imp_alns_td_global:+.2f}%"
-
-paper_records.append({
-    "Benchmark / Clase": "Promedio Global",
-    "BKS (NV/TD)": fmt_nv_td(avg_bks_nv, avg_bks_td),
-    "Classical ALNS (NV/TD)": fmt_nv_td(avg_classic_nv, avg_classic_td),
-    "Proposed RL-ALNS (NV/TD)": fmt_nv_td(avg_ql_nv, avg_ql_td),
-    "Gap vs. BKS (NV/TD %)": gap_str_global,
-    "Imp. vs. ALNS (NV/TD %)": imp_str_global
-})
+nv_td_global = {"BKS": (df_paper_final["BKS_Vehiculos"].mean(), df_paper_final["BKS_Distancia"].mean())}
+for a in ALGOS:
+    nv_td_global[a] = (df_paper_final[f"Avg_Vehiculos_{a}"].mean(), df_paper_final[f"Avg_Distancia_{a}"].mean())
+paper_records.append(fila_paper("Promedio Global", nv_td_global))
 
 df_paper_out = pd.DataFrame(paper_records)
 df_paper_out.to_csv(os.path.join(TABLAS_DIR, "tabla_paper_format.csv"), index=False)
 print(f"-> Generada tabla: tabla_paper_format.csv (Formato RL-ALNS).")
 
-print("\n--- TABLA PRINCIPAL DE RESULTADOS (FORMATO PAPER) ---")
-headers = df_paper_out.columns.tolist()
-# Ancho por columna calculado a partir del contenido real (encabezado o mayor
-# valor), en vez de un formato fijo, que se desalinea apenas cambia un valor.
-col_widths = {h: max(len(h), df_paper_out[h].astype(str).map(len).max()) for h in headers}
-header_format = " | ".join(f"{{:<{col_widths[h]}}}" for h in headers)
-sep_len = sum(col_widths.values()) + 3 * (len(headers) - 1)
+def imprimir_tabla(tabla):
+    headers = tabla.columns.tolist()
+    # Ancho por columna calculado a partir del contenido real (encabezado o mayor
+    # valor), en vez de un formato fijo, que se desalinea apenas cambia un valor.
+    col_widths = {h: max(len(h), tabla[h].astype(str).map(len).max()) for h in headers}
+    header_format = " | ".join(f"{{:<{col_widths[h]}}}" for h in headers)
+    sep_len = sum(col_widths.values()) + 3 * (len(headers) - 1)
 
-print(header_format.format(*headers))
-print("-" * sep_len)
-for _, row in df_paper_out.iterrows():
-    print(header_format.format(*[str(row[h]) for h in headers]))
-print("-" * sep_len)
+    print(header_format.format(*headers))
+    print("-" * sep_len)
+    for _, row in tabla.iterrows():
+        print(header_format.format(*[str(row[h]) for h in headers]))
+    print("-" * sep_len)
+
+print("\n--- TABLA PRINCIPAL DE RESULTADOS (FORMATO PAPER) ---")
+imprimir_tabla(df_paper_out)
+
+# --- MARCADOR PAREADO ENTRE ALGORITMOS ---
+# Por instancia, sobre las medias de las corridas: primero flota, luego distancia
+PARES = [("QLEARNING", "CLASSIC")] if set(ETIQUETAS) <= set(ALGOS) else []
+
+def marcador(a, b):
+    p = df.pivot(index="Instancia", columns="Algoritmo", values=["Avg_Vehiculos", "Avg_Distancia"]).dropna()
+    dv = p[("Avg_Vehiculos", a)] - p[("Avg_Vehiculos", b)]
+    dd = p[("Avg_Distancia", a)] - p[("Avg_Distancia", b)]
+    gana = (dv < -1e-9) | ((dv.abs() <= 1e-9) & (dd < -1e-9))
+    pierde = (dv > 1e-9) | ((dv.abs() <= 1e-9) & (dd > 1e-9))
+    misma = dv.abs() <= 1e-9
+    rec = {"Par": f"{a} vs {b}", "Instancias": len(p),
+           "Gana": int(gana.sum()), "Empata": int((~gana & ~pierde).sum()), "Pierde": int(pierde.sum()),
+           "Mejor flota": int((dv < -1e-9).sum()), "Peor flota": int((dv > 1e-9).sum()),
+           "Mejora dist. misma flota (%)": round(float((-dd[misma] / p[("Avg_Distancia", b)][misma]).mean() * 100), 3)
+                                          if misma.any() else float("nan")}
+    # Wilcoxon pareado de la distancia media en las instancias con la misma flota media
+    if wilcoxon is not None and misma.sum() > 0 and (dd[misma].abs() > 1e-9).any():
+        rec["Wilcoxon p (dist.)"] = round(float(wilcoxon(p[("Avg_Distancia", a)][misma],
+                                                         p[("Avg_Distancia", b)][misma]).pvalue), 4)
+    else:
+        rec["Wilcoxon p (dist.)"] = "n/a"
+    return rec
+
+if PARES:
+    df_marcador = pd.DataFrame([marcador(a, b) for a, b in PARES])
+    df_marcador.to_csv(os.path.join(TABLAS_DIR, "marcador_pareado.csv"), index=False)
+    print("\n--- MARCADOR PAREADO POR INSTANCIA (medias; flota y luego distancia) ---")
+    imprimir_tabla(df_marcador)
+    if wilcoxon is None:
+        print("(scipy no instalado: se omite el test de Wilcoxon)")
 
 # --- GRAFICOS ---
 sns.set_theme(style="whitegrid")
@@ -185,7 +212,7 @@ for _, row in df.iterrows():
     clase = row["Clase"]
     bks_veh = row["BKS_Vehiculos"]
     bks_dist = row["BKS_Distancia"]
-    
+
     for i in run_ids:
         col_veh = f"Veh_Run{i}"
         col_dist = f"Dist_Run{i}"
@@ -194,7 +221,7 @@ for _, row in df.iterrows():
             dist = float(row[col_dist])
             gap_veh = ((veh - bks_veh) / bks_veh) * 100 if bks_veh > 0 else 0
             gap_dist = ((dist - bks_dist) / bks_dist) * 100 if bks_dist > 0 else 0
-            
+
             runs_data.append({
                 "Instancia": inst,
                 "Algoritmo": algo,
@@ -211,7 +238,7 @@ df_melted = pd.DataFrame(runs_data)
 def generate_boxplot(y_col, title, filename):
     plt.figure(figsize=(10, 6))
     plot_df = df_melted if not df_melted.empty else df
-    sns.boxplot(data=plot_df, x="Clase", y=y_col, hue="Algoritmo", order=["C1", "C2", "R1", "R2", "RC1", "RC2"])
+    sns.boxplot(data=plot_df, x="Clase", y=y_col, hue="Algoritmo", order=ORDEN_CLASES, hue_order=ALGOS)
     plt.title(title)
     plt.ylabel(y_col)
     plt.xlabel("Clase de Instancia")
@@ -219,21 +246,21 @@ def generate_boxplot(y_col, title, filename):
     plt.savefig(os.path.join(GRAFICOS_DIR, filename), dpi=300)
     plt.close()
 
-    
-def generate_scatter(val_col, title, filename):
+
+def generate_scatter(val_col, x_algo, y_algo, title, filename):
     df_scatter = df.pivot(index="Instancia", columns="Algoritmo", values=val_col).dropna()
-    if df_scatter.empty or "CLASSIC" not in df_scatter.columns or "QLEARNING" not in df_scatter.columns:
+    if df_scatter.empty or x_algo not in df_scatter.columns or y_algo not in df_scatter.columns:
         return
     plt.figure(figsize=(8, 8))
-    sns.scatterplot(data=df_scatter, x="CLASSIC", y="QLEARNING", alpha=0.7)
+    sns.scatterplot(data=df_scatter, x=x_algo, y=y_algo, alpha=0.7)
 
-    min_val = min(df_scatter["CLASSIC"].min(), df_scatter["QLEARNING"].min()) - 1
-    max_val = max(df_scatter["CLASSIC"].max(), df_scatter["QLEARNING"].max()) + 1
+    min_val = min(df_scatter[x_algo].min(), df_scatter[y_algo].min()) - 1
+    max_val = max(df_scatter[x_algo].max(), df_scatter[y_algo].max()) + 1
     plt.plot([min_val, max_val], [min_val, max_val], 'r--', label="Linea y=x (Empate)")
 
     plt.title(title)
-    plt.xlabel(f"{val_col} - CLASSIC")
-    plt.ylabel(f"{val_col} - Q-LEARNING")
+    plt.xlabel(f"{val_col} - {x_algo}")
+    plt.ylabel(f"{val_col} - {y_algo}")
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(GRAFICOS_DIR, filename), dpi=300)
@@ -244,8 +271,8 @@ generate_boxplot("GAP_Vehiculos(%)", "Comparacion de GAP Vehiculos Promedio por 
 generate_boxplot("GAP_Distancia(%)", "Comparacion de GAP Distancia Promedio por Clase de Instancia (Boxplot)", "boxplot_gap_distancia.png")
 
 # Dispersiones
-generate_scatter("GAP_Vehiculos(%)", "Dispersion de GAP Vehiculos: ALNS vs Q-Learning", "scatter_gap_vehiculos.png")
-generate_scatter("GAP_Distancia(%)", "Dispersion de GAP Distancia: ALNS vs Q-Learning", "scatter_gap_distancia.png")
+generate_scatter("GAP_Vehiculos(%)", "CLASSIC", "QLEARNING", "Dispersion de GAP Vehiculos: ALNS vs Q-Learning", "scatter_gap_vehiculos.png")
+generate_scatter("GAP_Distancia(%)", "CLASSIC", "QLEARNING", "Dispersion de GAP Distancia: ALNS vs Q-Learning", "scatter_gap_distancia.png")
 
 print(f"\nGraficos generados exitosamente en {GRAFICOS_DIR}.")
 print("=== FIN DEL ANALISIS ===")
