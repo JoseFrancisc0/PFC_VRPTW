@@ -23,6 +23,21 @@ struct Move {
 // clientes sin asignar, vehiculos o distancia (el mismo orden que impone cost())
 double relativeGain(const Solution& ref, const Solution& cand);
 
+// Seleccion por ruleta adaptativa de Ropke & Pisinger (2006): puntaje 33/13/9/0 por iteracion,
+// pesos actualizados al cerrar cada segmento de SEGMENT_SIZE iteraciones
+struct Roulette {
+    static const int SEGMENT_SIZE = 100;
+
+    std::vector<double> weights;
+    std::vector<double> scores;
+    std::vector<int> uses;
+
+    explicit Roulette(int n) : weights(n, 1.0), scores(n, 0.0), uses(n, 0) {}
+    int select();
+    void record(int idx, const Outcome& outcome);
+    void closeSegment();
+};
+
 class ALNS {
     public:
         ALNS(const Solution& _initial_sol, const SolverParams& _params);

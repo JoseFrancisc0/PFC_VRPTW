@@ -43,6 +43,41 @@ double relativeGain(const Solution& ref, const Solution& cand) {
     return std::max(0.0, (ref.total_distance - cand.total_distance) / ref.total_distance);
 }
 
+namespace {
+const double W_NEW_BEST = 33.0;
+const double W_IMPROVED = 13.0;
+const double W_ACCEPTED = 9.0;
+const double W_REJECTED = 0.0;
+
+const double ROULETTE_DECAY = 0.9;
+const double MIN_WEIGHT     = 0.01;
+}
+
+int Roulette::select() {
+    std::discrete_distribution<int> distr(weights.begin(), weights.end());
+    return distr(rng);
+}
+
+void Roulette::record(int idx, const Outcome& outcome) {
+    scores[idx] += outcome.new_best ? W_NEW_BEST
+                 : outcome.improved ? W_IMPROVED
+                 : outcome.accepted ? W_ACCEPTED
+                 : W_REJECTED;
+    uses[idx]++;
+}
+
+void Roulette::closeSegment() {
+    for (size_t j = 0; j < weights.size(); ++j) {
+        if (uses[j] > 0) {
+            double avg_score = scores[j] / uses[j];
+            weights[j] = (ROULETTE_DECAY * weights[j]) + ((1.0 - ROULETTE_DECAY) * avg_score);
+            if (weights[j] < MIN_WEIGHT) weights[j] = MIN_WEIGHT;
+        }
+        scores[j] = 0.0;
+        uses[j] = 0;
+    }
+}
+
 ALNS::ALNS(const Solution& _initial_sol, const SolverParams& _params)
     : params(_params), current_sol(_initial_sol), best_sol(_initial_sol) {}
 

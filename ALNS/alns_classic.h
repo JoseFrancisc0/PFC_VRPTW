@@ -9,17 +9,6 @@ class ALNS_Classic : public ALNS {
         ALNS_Classic(const Solution& _initial_sol, const SolverParams& _params);
 
     private:
-        struct Roulette {
-            std::vector<double> weights;
-            std::vector<double> scores;
-            std::vector<int> uses;
-
-            explicit Roulette(int n) : weights(n, 1.0), scores(n, 0.0), uses(n, 0) {}
-            int select();
-            void addScore(int idx, double score);
-            void closeSegment();
-        };
-
         Roulette destroy;
         Roulette repair;
         int d_idx = 0;

@@ -1,2 +1,2 @@
 Par,Instancias,Gana,Empata,Pierde,Mejor flota,Peor flota,Mejora dist. misma flota (%),Wilcoxon p (dist.)
-QLEARNING vs CLASSIC,56,24,17,15,5,4,0.21,0.0472
+QLEARNING vs CLASSIC,56,17,17,22,6,5,0.139,0.8199
