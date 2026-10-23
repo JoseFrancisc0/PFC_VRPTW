@@ -1,9 +1,0 @@
-============================================================
-Job ID:            58184
-Nodo asignado:     n004
-Workers asignados: 32
-Tamaño:            600
-Args extra:        --algos QLEARNING --master results/master_gh600_ql.csv
-Commit:            4238ce2 automatizacion de compilacion en el sh
-============================================================
-[BUILD] Compilando con g++ (GCC) 12.4.0 ...
