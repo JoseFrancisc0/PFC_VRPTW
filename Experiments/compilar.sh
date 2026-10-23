@@ -1,12 +1,15 @@
 #!/bin/bash
-# Compila build/ALNS_VRPTW en el cluster. Ejecutar en el nodo de login despues de cada git pull:
+# Actualiza el repositorio (git pull) y compila build/ALNS_VRPTW en el cluster. Ejecutar en el nodo de login:
 #
 #     bash compilar.sh
 #
-# Se puede correr desde cualquier carpeta. Carga el modulo de gcc, compila y avisa si algo falla.
+# Se puede correr desde cualquier carpeta. Si el pull falla (p. ej. cambios locales), no compila.
 
 set -e
 cd "$(dirname "$0")/.."
+
+git pull
+echo "Codigo en: $(git log -1 --format='%h %s')"
 
 module purge
 module load gnu12/12.4.0
