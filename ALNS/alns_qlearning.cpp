@@ -19,6 +19,11 @@ const double PERTURB_FAIL_REWARD = -0.5;
 const double REWARD_CAP     = 2.0;
 const double BASELINE_DECAY = 0.9;
 
+// Rutas largas (R2, RC2, C2: 30-50 clientes por ruta; las de tipo 1 tienen ~10). Ahi ningun destructor
+// solo iguala a la mezcla, y la recompensa de 50 iteraciones premia al que mejora rapido (worst removal)
+// aunque estanque la busqueda: con params.epsilon_long >= 0 la fase 2 usa ese piso de exploracion
+const double LONG_ROUTE_CLIENTS = 20.0;
+
 }
 
 // Acciones: a < NUM_DESTROY usa el destructor a; a >= NUM_DESTROY, el mismo destructor tras perturbar.
@@ -50,10 +55,19 @@ int ALNS_QLearning::chooseAction() {
                                  MIN_TRIES_PER_ACTION * num_actions);
     int exploit_from = std::max(explore_until + 1, static_cast<int>(EXPLOIT_FROM * episodes));
 
-    // epsilon = 1 en el bucle de aprendizaje; luego decae exponencialmente hasta epsilon_min
+    // Al abrir la fase 2 la solucion actual es la completa de la que parte: se mide el largo de sus rutas
+    if (phase == 1 && decisions == 0) {
+        const Solution& sol = currentSolution();
+        double per_route = static_cast<double>(sol.inst.clients.size() - 1) / std::max(1, sol.used_vehicles);
+        long_routes = per_route >= LONG_ROUTE_CLIENTS;
+    }
+    double eps_floor = (phase == 1 && long_routes && params.epsilon_long >= 0.0)
+                     ? params.epsilon_long : params.epsilon_min;
+
+    // epsilon = 1 en el bucle de aprendizaje; luego decae exponencialmente hasta eps_floor
     double progress = static_cast<double>(decisions - explore_until) / (exploit_from - explore_until);
     double eps_now = decisions < explore_until ? 1.0
-                   : std::max(params.epsilon_min, std::pow(params.epsilon_min, progress));
+                   : std::max(eps_floor, std::pow(eps_floor, progress));
     ++decisions;
 
     double max_q = *std::max_element(q_values.begin(), q_values.begin() + num_actions);
