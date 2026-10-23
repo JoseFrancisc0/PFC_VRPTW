@@ -13,6 +13,7 @@ struct SolverParams {
     double eta = 0.8;
     int perturb = 1;              // 1: en la fase 1 el agente puede abrir un episodio con perturbacion
     double softmax_tau = 0.0;     // > 0: politica softmax sobre Q en vez de epsilon-greedy
+    double epsilon_long = 0.5;    // piso de epsilon en la fase 2 si las rutas son largas (< 0: usa epsilon_min)
 
     void set(const std::string& kv) {
         size_t eq = kv.find('=');
@@ -28,6 +29,7 @@ struct SolverParams {
         else if (k == "eta")              eta = std::stod(v);
         else if (k == "perturb")          perturb = std::stoi(v);
         else if (k == "softmax_tau")      softmax_tau = std::stod(v);
+        else if (k == "epsilon_long")     epsilon_long = std::stod(v);
         else throw std::runtime_error("Parametro desconocido: " + k);
     }
 };

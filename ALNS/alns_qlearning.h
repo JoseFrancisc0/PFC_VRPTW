@@ -28,6 +28,7 @@ class ALNS_QLearning : public ALNS {
         Solution episode_start;
 
         double baseline = 0.0;  // media movil de las mejoras positivas de la fase
+        bool long_routes = false;  // fase 2: la solucion de partida tiene rutas largas
 
         Roulette repair;
         int r_idx = 0;
