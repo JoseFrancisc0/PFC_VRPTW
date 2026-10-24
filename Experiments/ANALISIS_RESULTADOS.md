@@ -111,7 +111,13 @@ Agrupado por largo de ruta:
 2. **R2 sigue siendo la clase débil.** Pierde 8/10 en 400 y 7/10 en 800, aunque por márgenes pequeños (+0.16 % y +0.25 %, antes +0.38 % y +0.90 %). En R2 ningún destructor por sí solo supera a la mezcla que mantiene la ruleta. Un agente que tiende a fijar un operador está en desventaja.
 3. **En rutas largas la ventaja no es significativa en distancia** en ningún tamaño (p entre 0.09 y 0.78). Lo que gana ahí viene sobre todo de la flota en C2 y RC2 y de C2 en distancia. La significancia global la sostienen las clases de rutas cortas.
 4. **En 400 el balance de victorias no es significativo** (35/23, p=0.15) y la flota queda empatada (6/6). Solo la distancia con misma flota es significativa (p=0.003).
-5. **La regla de rutas largas es una heurística fijada a mano**, no aprendida por el agente. El umbral de 20 clientes por ruta y el piso de 0.5 se eligieron con instancias de ajuste de GH 200 y GH 400 (índices 2, 5 y 8). Luego se validaron en otras instancias de 200 antes de las campañas completas. Las campañas completas incluyen esas instancias de ajuste, así que hay algo de sesgo de ajuste en 200 y 400. En 600 y 800 no se ajustó nada.
+5. **La regla de rutas largas tiene dos hiperparámetros elegidos con un subconjunto del benchmark.**
+   - **Qué mira el algoritmo:** no usa el nombre ni la clase de la instancia. Al empezar la fase 2 calcula clientes por ruta en su propia solución y, si son 20 o más, sube el piso de epsilon a 0.5.
+   - **El umbral de 20:** en todos los tamaños las clases de tipo 1 tienen unos 10–11 clientes por ruta y las de tipo 2, entre 31 y 55. Cualquier umbral entre unos 12 y 30 separa igual, así que el resultado no depende de afinarlo.
+   - **El piso de 0.5:** se eligió entre 0.3, 0.5 y 0.7 con las instancias de índices 2, 5 y 8 de GH 200 y GH 400. Luego se validó en los índices 1, 4, 7 y 10 de GH 200.
+   - **Cuánto pesa ese ajuste:** sin las instancias de ajuste (quedan 42 por tamaño), GH 200 sigue significativo (29/4/9, signos p=0.002; distancia con misma flota −0.21 %, p=0.001). GH 400 conserva la mejora de distancia (−0.63 %, p=0.037), pero el balance de victorias baja a 23/18 (p=0.53) y la flota queda 3/5.
+   - **Sin ajuste:** en GH 600, GH 800 y Solomon no se ajustó nada, y la regla también se activa en las clases de tipo 2 de Solomon.
+   - **Otros parámetros del agente:** el horizonte de epsilon, las pruebas mínimas por acción y el tope de la recompensa se fijaron con pruebas cortas en Solomon y en un subconjunto de GH 200.
 6. **El tamaño del efecto es moderado.** Mejoras de 0.2–1 % en distancia sobre un gap de 2–7 % frente al BKS. El Q-learning acerca el ALNS al BKS, pero no cierra la brecha.
 
 ## 7. Conclusión
