@@ -26,13 +26,12 @@ const double LONG_ROUTE_CLIENTS = 20.0;
 
 }
 
-// Acciones de destruccion: a < NUM_DESTROY usa el destructor a; a >= NUM_DESTROY, el mismo tras perturbar.
+// Acciones: a < NUM_DESTROY usa el destructor a; a >= NUM_DESTROY, el mismo destructor tras perturbar.
 // La perturbacion se acepta siempre, por eso solo se ofrece en la fase 1 (rutas)
 ALNS_QLearning::ALNS_QLearning(const Solution& _initial_sol, const SolverParams& _params)
     : ALNS(_initial_sol, _params),
       Q(NUM_STATES, std::vector<double>(2 * NUM_DESTROY, 0.0)),
-      QR(NUM_STATES, std::vector<double>(NUM_REPAIR, 0.0)),
-      episode_start(_initial_sol) {}
+      episode_start(_initial_sol), repair(NUM_REPAIR) {}
 
 // La fase 2 tiene sus propios estados: se descarta el episodio a medias y se vuelve a explorar
 void ALNS_QLearning::onDistancePhase(int) {
@@ -47,11 +46,13 @@ int ALNS_QLearning::numActions() const {
     return (phase == 0 && params.perturb) ? 2 * NUM_DESTROY : NUM_DESTROY;
 }
 
-// Epsilon del episodio que se abre: 1 en el bucle de aprendizaje; luego decae exponencialmente hasta el piso
-double ALNS_QLearning::explorationRate() {
+int ALNS_QLearning::chooseAction() {
+    const std::vector<double>& q_values = Q[state];
+    int num_actions = numActions();
+
     int episodes = std::max(1, phase_iters / params.episode_len);
     int explore_until = std::max(static_cast<int>(std::ceil(params.learning_loop * episodes)),
-                                 MIN_TRIES_PER_ACTION * numActions());
+                                 MIN_TRIES_PER_ACTION * num_actions);
     int exploit_from = std::max(explore_until + 1, static_cast<int>(EXPLOIT_FROM * episodes));
 
     // Al abrir la fase 2 la solucion actual es la completa de la que parte: se mide el largo de sus rutas
@@ -63,19 +64,17 @@ double ALNS_QLearning::explorationRate() {
     double eps_floor = (phase == 1 && long_routes && params.epsilon_long >= 0.0)
                      ? params.epsilon_long : params.epsilon_min;
 
+    // epsilon = 1 en el bucle de aprendizaje; luego decae exponencialmente hasta eps_floor
     double progress = static_cast<double>(decisions - explore_until) / (exploit_from - explore_until);
     double eps_now = decisions < explore_until ? 1.0
                    : std::max(eps_floor, std::pow(eps_floor, progress));
     ++decisions;
-    return eps_now;
-}
 
-int ALNS_QLearning::chooseAction(const std::vector<double>& q_values, int num_actions, double eps_now) {
     double max_q = *std::max_element(q_values.begin(), q_values.begin() + num_actions);
 
     // Softmax (Boltzmann) tras el bucle de aprendizaje: cada accion con probabilidad creciente en Q.
     // Conserva la mezcla de operadores en lugar de fijar casi siempre el de mayor Q
-    if (params.softmax_tau > 0.0 && eps_now < 1.0) {
+    if (params.softmax_tau > 0.0 && decisions > explore_until) {
         std::vector<double> w(num_actions);
         for (int a = 0; a < num_actions; ++a) w[a] = std::exp((q_values[a] - max_q) / params.softmax_tau);
         std::discrete_distribution<int> soft(w.begin(), w.end());
@@ -98,15 +97,14 @@ int ALNS_QLearning::chooseAction(const std::vector<double>& q_values, int num_ac
 
 Move ALNS_QLearning::selectOperators(int) {
     if (episode_step == 0) {
-        double eps_now = explorationRate();
-        action = chooseAction(Q[state], numActions(), eps_now);
-        repair_action = chooseAction(QR[state], NUM_REPAIR, eps_now);
+        action = chooseAction();
         episode_start = currentSolution();
         episode_gain_best = 0.0;
         episode_gain_local = 0.0;
     }
 
-    return {action % NUM_DESTROY, repair_action, episode_step == 0 && action >= NUM_DESTROY};
+    r_idx = repair.select();
+    return {action % NUM_DESTROY, r_idx, episode_step == 0 && action >= NUM_DESTROY};
 }
 
 double ALNS_QLearning::reward(double improvement) {
@@ -117,7 +115,10 @@ double ALNS_QLearning::reward(double improvement) {
     return r;
 }
 
-void ALNS_QLearning::learn(int, const Outcome& outcome) {
+void ALNS_QLearning::learn(int iter, const Outcome& outcome) {
+    repair.record(r_idx, outcome);
+    if (iter % Roulette::SEGMENT_SIZE == 0) repair.closeSegment();
+
     // La mejora global se acumula por iteracion: asi cuenta la ruta eliminada aunque la etapa reinicie
     episode_gain_best += outcome.gain_best;
 
@@ -130,15 +131,10 @@ void ALNS_QLearning::learn(int, const Outcome& outcome) {
     episode_step = 0;
 
     double improvement = params.eta * episode_gain_best + (1.0 - params.eta) * episode_gain_local;
-    double r = reward(improvement);
 
     int next_state = 2 * phase + (improvement > 0.0 ? 1 : 0);
     int next_actions = numActions();
     double max_next_q = *std::max_element(Q[next_state].begin(), Q[next_state].begin() + next_actions);
-    Q[state][action] += params.alpha * (r + params.gamma * max_next_q - Q[state][action]);
-
-    // La tabla de reparacion aprende con la misma recompensa y el mismo estado
-    double max_next_r = *std::max_element(QR[next_state].begin(), QR[next_state].end());
-    QR[state][repair_action] += params.alpha * (r + params.gamma * max_next_r - QR[state][repair_action]);
+    Q[state][action] += params.alpha * (reward(improvement) + params.gamma * max_next_q - Q[state][action]);
     state = next_state;
 }
