@@ -5,8 +5,8 @@
 #include "alns.h"
 
 // El agente decide por episodios de episode_len iteraciones (Li et al., 2026): en cada uno fija
-// el operador de destruccion y, en la fase 1, si el episodio arranca con una perturbacion.
-// La reparacion se elige con la misma ruleta adaptativa del ALNS clasico.
+// el operador de destruccion (y, en la fase 1, si el episodio arranca con una perturbacion) y el de
+// reparacion. Cada eleccion tiene su tabla Q; las dos comparten estado y recompensa.
 class ALNS_QLearning : public ALNS {
     public:
         ALNS_QLearning(const Solution& _initial_sol, const SolverParams& _params);
@@ -16,10 +16,12 @@ class ALNS_QLearning : public ALNS {
         // recompensa). Mejorar la mejor global es raro: ese estado casi no se visitaba y sesgaba el bootstrap
         static const int NUM_STATES = 4;
 
-        std::vector<std::vector<double>> Q;
+        std::vector<std::vector<double>> Q;   // destruccion (+ perturbacion)
+        std::vector<std::vector<double>> QR;  // reparacion
         int phase = 0;
         int state = 0;
         int action = 0;
+        int repair_action = 0;
         int decisions = 0;  // episodios elegidos en la fase en curso
 
         int episode_step = 0;  // 0: el siguiente selectOperators abre un episodio
@@ -30,14 +32,12 @@ class ALNS_QLearning : public ALNS {
         double baseline = 0.0;  // media movil de las mejoras positivas de la fase
         bool long_routes = false;  // fase 2: la solucion de partida tiene rutas largas
 
-        Roulette repair;
-        int r_idx = 0;
-
         Move selectOperators(int iter) override;
         void learn(int iter, const Outcome& outcome) override;
         void onDistancePhase(int iter) override;
-        int numActions() const;  // con perturbacion solo en la fase 1 y si params.perturb
-        int chooseAction();
+        int numActions() const;  // destrucciones; con perturbacion solo en la fase 1 y si params.perturb
+        double explorationRate();
+        int chooseAction(const std::vector<double>& q_values, int num_actions, double eps_now);
         double reward(double improvement);
 };
 
