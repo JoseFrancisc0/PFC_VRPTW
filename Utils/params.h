@@ -8,7 +8,7 @@ struct SolverParams {
     // Parametros del Q-learning
     double alpha = 0.1;           // tasa de aprendizaje
     double gamma = 0.8;           // factor de descuento
-    double epsilon_min = 0.1;     // exploracion residual
+    double epsilon_min = 0.2;     // exploracion residual: fraccion de elecciones al azar tras la fase de aprendizaje
     double learning_loop = 0.05;  // fraccion de cada fase con exploracion pura
     double eta = 0.8;             // peso de la mejora sobre la mejor solucion frente a la de la actual
 
