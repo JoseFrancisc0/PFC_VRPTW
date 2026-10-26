@@ -4,40 +4,40 @@
 #include <vector>
 #include "alns.h"
 
-// El agente decide por episodios de episode_len iteraciones (Li et al., 2026): en cada uno fija
-// el operador de destruccion y, en la fase 1, si el episodio arranca con una perturbacion.
-// La reparacion se elige con la misma ruleta adaptativa del ALNS clasico.
+// Tabla Q de un tipo de operador: q[estado][operador]. Es el analogo de Roulette en el ALNS clasico:
+// select elige un operador y update aprende del resultado, ambos en cada iteracion
+struct QTable {
+    std::vector<std::vector<double>> q;
+
+    QTable(int num_states, int num_actions) : q(num_states, std::vector<double>(num_actions, 0.0)) {}
+    int select(int state, double epsilon);  // epsilon-greedy; los empates se resuelven al azar
+    void update(int state, int action, double reward, int next_state, double alpha, double gamma);
+};
+
+// Seleccion por Q-learning: una tabla para la destruccion y otra para la reparacion. Las dos comparten
+// estado y recompensa, eligen en cada iteracion y no cambian de tamano entre fases
 class ALNS_QLearning : public ALNS {
     public:
         ALNS_QLearning(const Solution& _initial_sol, const SolverParams& _params);
 
     private:
-        // Estado: fase (rutas / distancia) x si el episodio anterior logro mejora (la misma senal de la
-        // recompensa). Mejorar la mejor global es raro: ese estado casi no se visitaba y sesgaba el bootstrap
+        // Estado = 2 * fase + (la iteracion anterior mejoro la solucion actual). Fase 0: rutas; 1: distancia
         static const int NUM_STATES = 4;
 
-        std::vector<std::vector<double>> Q;
+        QTable destroy;
+        QTable repair;
+        int d_idx = 0;
+        int r_idx = 0;
+
         int phase = 0;
         int state = 0;
-        int action = 0;
-        int decisions = 0;  // episodios elegidos en la fase en curso
-
-        int episode_step = 0;  // 0: el siguiente selectOperators abre un episodio
-        double episode_gain_best = 0.0;
-        double episode_gain_local = 0.0;  // mayor mejora de la solucion actual sobre episode_start
-        Solution episode_start;
-
+        int phase_start = 0;    // iteracion en la que empezo la fase en curso
         double baseline = 0.0;  // media movil de las mejoras positivas de la fase
-        bool long_routes = false;  // fase 2: la solucion de partida tiene rutas largas
-
-        Roulette repair;
-        int r_idx = 0;
 
         Move selectOperators(int iter) override;
         void learn(int iter, const Outcome& outcome) override;
         void onDistancePhase(int iter) override;
-        int numActions() const;  // con perturbacion solo en la fase 1 y si params.perturb
-        int chooseAction();
+        double epsilon(int iter) const;
         double reward(double improvement);
 };
 

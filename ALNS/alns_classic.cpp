@@ -6,7 +6,7 @@ ALNS_Classic::ALNS_Classic(const Solution& _initial_sol, const SolverParams& _pa
 Move ALNS_Classic::selectOperators(int) {
     d_idx = destroy.select();
     r_idx = repair.select();
-    return {d_idx, r_idx, false};
+    return {d_idx, r_idx};
 }
 
 void ALNS_Classic::learn(int iter, const Outcome& outcome) {

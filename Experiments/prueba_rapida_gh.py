@@ -15,11 +15,11 @@ Uso (desde Experiments/):
     python prueba_rapida_gh.py --resume                # completa una prueba cortada
     python prueba_rapida_gh.py --runs 5 --indices 1 3 5 7 9
     python prueba_rapida_gh.py --classes R1 RC1 R2 RC2 # solo las clases con margen sobre el BKS
-    python prueba_rapida_gh.py --tag ep25 --params episode_len=25   # variante, en otro CSV
+    python prueba_rapida_gh.py --tag a02 --params alpha=0.2   # variante, en otro CSV
     python prueba_rapida_gh.py --solo-analisis         # re-imprime el resumen de un CSV ya hecho
 
     # Variante del Q-learning reutilizando el CLASSIC ya corrido (la mitad del costo):
-    python prueba_rapida_gh.py --size 400 --tag tau03 --params softmax_tau=0.3 --ref results/rapida_gh400.csv
+    python prueba_rapida_gh.py --size 400 --tag e005 --params epsilon_min=0.05 --ref results/rapida_gh400.csv
 """
 import os
 import csv

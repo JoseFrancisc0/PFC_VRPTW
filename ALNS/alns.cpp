@@ -129,16 +129,17 @@ Solution ALNS::solve(int _max_iters) {
         Solution candidate = current_sol;
 
         Move move = selectOperators(iter);
-        applyOperators(candidate, move.destroy, move.repair, move.perturb);
+        applyOperators(candidate, move.destroy, move.repair);
 
         double cand_cost = cost(candidate);
         size_t prev_bank = best_sol.unassigned.size();
 
         Outcome outcome;
         outcome.gain_best = relativeGain(best_sol, candidate);
+        outcome.gain_current = relativeGain(current_sol, candidate);
         outcome.new_best = cand_cost < best_cost;
         outcome.improved = outcome.new_best || cand_cost < curr_cost;
-        outcome.accepted = move.perturb || outcome.improved || accept(cand_cost, curr_cost, T);
+        outcome.accepted = outcome.improved || accept(cand_cost, curr_cost, T);
 
         if (outcome.accepted) {
             current_sol = candidate;

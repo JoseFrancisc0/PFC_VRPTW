@@ -9,14 +9,14 @@ struct Outcome {
     bool new_best = false;
     bool improved = false;
     bool accepted = false;
-    double gain_best = 0.0;
+    double gain_best = 0.0;     // ganancia relativa sobre la mejor solucion
+    double gain_current = 0.0;  // ganancia relativa sobre la solucion actual
 };
 
-// Lo que aplica una iteracion. Con perturb, la destruccion es amplia y el candidato se acepta siempre
+// Operadores que aplica una iteracion
 struct Move {
     int destroy = 0;
     int repair = 0;
-    bool perturb = false;
 };
 
 // Mejora relativa de cand sobre ref en el primer criterio en que difieren:

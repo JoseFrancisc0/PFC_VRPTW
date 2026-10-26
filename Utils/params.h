@@ -5,15 +5,12 @@
 #include <stdexcept>
 
 struct SolverParams {
-    double alpha = 0.1;
-    double gamma = 0.8;
-    double epsilon_min = 0.1;
-    int episode_len = 50;         // iteraciones por decision del agente
-    double learning_loop = 0.05;  // fraccion de los episodios de cada fase con exploracion pura
-    double eta = 0.8;
-    int perturb = 1;              // 1: en la fase 1 el agente puede abrir un episodio con perturbacion
-    double softmax_tau = 0.0;     // > 0: politica softmax sobre Q en vez de epsilon-greedy
-    double epsilon_long = 0.5;    // piso de epsilon en la fase 2 si las rutas son largas (< 0: usa epsilon_min)
+    // Parametros del Q-learning
+    double alpha = 0.1;           // tasa de aprendizaje
+    double gamma = 0.8;           // factor de descuento
+    double epsilon_min = 0.1;     // exploracion residual
+    double learning_loop = 0.05;  // fraccion de cada fase con exploracion pura
+    double eta = 0.8;             // peso de la mejora sobre la mejor solucion frente a la de la actual
 
     void set(const std::string& kv) {
         size_t eq = kv.find('=');
@@ -24,12 +21,8 @@ struct SolverParams {
         if      (k == "alpha")            alpha = std::stod(v);
         else if (k == "gamma")            gamma = std::stod(v);
         else if (k == "epsilon_min")      epsilon_min = std::stod(v);
-        else if (k == "episode_len")      episode_len = std::stoi(v);
         else if (k == "learning_loop")    learning_loop = std::stod(v);
         else if (k == "eta")              eta = std::stod(v);
-        else if (k == "perturb")          perturb = std::stoi(v);
-        else if (k == "softmax_tau")      softmax_tau = std::stod(v);
-        else if (k == "epsilon_long")     epsilon_long = std::stod(v);
         else throw std::runtime_error("Parametro desconocido: " + k);
     }
 };
