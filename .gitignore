@@ -12,3 +12,7 @@ __pycache__/
 
 Results/CLASSIC/
 Results/QLEARNING/
+
+# Salidas de SLURM del cluster
+Experiments/vrptw_*.out
+Experiments/vrptw_*.err

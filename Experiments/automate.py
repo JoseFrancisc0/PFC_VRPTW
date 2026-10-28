@@ -1,12 +1,17 @@
-"""Campana Homberger (GH) por tamano: CLASSIC vs QLEARNING, en paralelo.
+"""Campana por tamano: CLASSIC vs QLEARNING, en paralelo.
 
-Flujo: una corrida del .exe por (instancia, algoritmo, run) -> una fila por
-corrida en results/master_gh<size>.csv -> notebooks/analisis_single_campaign_<size>.ipynb.
-Se corren las 60 instancias del tamano (10 por clase).
+Tamano 100: Solomon (56 instancias, campana "solomon_100"). 200 a 1000: Gehring & Homberger
+(60 instancias, 10 por clase, campana "gh<size>").
+
+Flujo: una corrida del .exe por (instancia, algoritmo, run) -> una fila por corrida en
+results/master_<campana>.csv -> notebooks/analisis_single_campaign_<...>.ipynb.
 
 Uso (desde Experiments/):
-    python automate.py --size 200             # SOBRESCRIBE results/master_gh200.csv
+    python automate.py --size 200             # CLASSIC y QLEARNING: SOBRESCRIBE results/master_gh200.csv
+    python automate.py --size 200 --solo-ql   # solo QLEARNING en results/master_gh200_ql.csv; al terminar
+                                              # reemplaza sus filas en master_gh200.csv (CLASSIC no cambia)
     python automate.py --size 200 --resume    # retoma una campana cortada
+    python automate.py --size 100             # Solomon: results/master_solomon_100.csv
 
 El CSV se escribe corrida a corrida (flush inmediato), asi que una campana
 cortada conserva lo hecho y se completa con --resume.
@@ -14,6 +19,7 @@ cortada conserva lo hecho y se completa con --resume.
 import os
 import re
 import csv
+import glob
 import time
 import argparse
 import subprocess
@@ -24,7 +30,6 @@ _build_dir = os.path.join(BASE_DIR, "..", "build")
 EXEC_PATH = os.path.join(_build_dir, "ALNS_VRPTW" if os.name != "nt" else "ALNS_VRPTW.exe")
 
 CLASES = ["C1", "C2", "R1", "R2", "RC1", "RC2"]
-INDICES = range(1, 11)
 ALGORITMOS = ["CLASSIC", "QLEARNING"]
 ITERACIONES = 25000
 RUNS = 10
@@ -53,9 +58,18 @@ def parse_result_line(stdout):
     return fields
 
 
+def campana(size):
+    return "solomon_100" if size == 100 else f"gh{size}"
+
+
 def instancias(size):
-    """(clase, nombre) de las instancias GH del tamano: <clase>_<size/100>_<1..10>."""
-    return [(cls, f"{cls}_{size // 100}_{idx}") for cls in CLASES for idx in INDICES]
+    """(clase, nombre, ruta) de cada instancia del tamano, leidas de su carpeta de benchmark."""
+    benchmark = os.path.join(BASE_DIR, "..", "solomon-100" if size == 100 else f"homberger-{size}")
+    lista = []
+    for cls in CLASES:
+        for path in sorted(glob.glob(os.path.join(benchmark, cls, "*.[tT][xX][tT]"))):
+            lista.append((cls, os.path.splitext(os.path.basename(path))[0], os.path.normpath(path)))
+    return lista
 
 
 def cargar_hechas(master_path):
@@ -102,17 +116,33 @@ def ejecutar_corrida(job, iters, params):
     return base, fila, None
 
 
+def maestro(size, solo_ql=False):
+    return os.path.join(BASE_DIR, "results", f"master_{campana(size)}{'_ql' if solo_ql else ''}.csv")
+
+
+def actualizar_maestro(size, ql_path):
+    """Reemplaza las filas QLEARNING del maestro del tamano por las de ql_path (CLASSIC se conserva)."""
+    master = maestro(size)
+    with open(master, newline="") as f:
+        filas = [r for r in csv.DictReader(f) if r["algorithm"] != "QLEARNING"]
+    with open(ql_path, newline="") as f:
+        filas += list(csv.DictReader(f))
+    with open(master, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=MASTER_FIELDS, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(filas)
+    print(f"=== {os.path.basename(master)} actualizado con QLEARNING de {os.path.basename(ql_path)} ===")
+
+
 def run_campaign(args):
-    if args.master is None:
-        args.master = os.path.join(BASE_DIR, "results", f"master_gh{args.size}.csv")
-    benchmark = args.benchmark or os.path.join(BASE_DIR, "..", f"homberger-{args.size}")
+    args.master = maestro(args.size, args.solo_ql)
+    args.algos = ["QLEARNING"] if args.solo_ql else ALGORITMOS
     insts = instancias(args.size)
 
     hechas = cargar_hechas(args.master) if args.resume else set()
 
     jobs = []
-    for cls, inst_name in insts:
-        full_path = os.path.normpath(os.path.join(benchmark, cls, inst_name + ".TXT"))
+    for cls, inst_name, full_path in insts:
         for algo in args.algos:
             for run in range(1, args.runs + 1):
                 if (inst_name.lower(), algo, str(run)) not in hechas:
@@ -136,12 +166,8 @@ def run_campaign(args):
     if not os.path.exists(EXEC_PATH):
         print(f"[ERROR] No existe el ejecutable {EXEC_PATH}. Compila primero (ver README).")
         return
-    faltan = sorted({j[0] for j in jobs if not os.path.exists(j[0])})
-    if faltan:
-        print(f"[ERROR] {len(faltan)} archivos de instancia no existen. Ejemplos:")
-        for p in faltan[:5]:
-            print(f"   {p}")
-        print("Revisa --benchmark y la estructura de carpetas. Abortando.")
+    if not insts:
+        print(f"[ERROR] No hay instancias del tamano {args.size} en la carpeta del benchmark.")
         return
 
     f, writer = abrir_csv(args.master, MASTER_FIELDS, args.resume)
@@ -177,16 +203,17 @@ def run_campaign(args):
     print(f"=== Fin size={args.size}. Nuevas: {hecho - base_hechas} | errores: {errores} | "
           f"Wall-clock: {int(h)}h {int(m)}m {s:.1f}s ===")
 
+    if args.solo_ql and hecho == total:
+        actualizar_maestro(args.size, args.master)
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Campana GH por tamano (ALNS / ALNS-Q), en paralelo")
-    ap.add_argument("--size", type=int, required=True, choices=[200, 400, 600, 800, 1000])
-    ap.add_argument("--master", default=None,
-                    help="CSV maestro de salida (default: results/master_gh<size>.csv)")
+    ap.add_argument("--size", type=int, required=True, choices=[100, 200, 400, 600, 800, 1000])
+    ap.add_argument("--solo-ql", action="store_true",
+                    help="corre solo QLEARNING en master_gh<size>_ql.csv y luego actualiza master_gh<size>.csv")
     ap.add_argument("--resume", action="store_true",
                     help="no sobrescribe: agrega solo las corridas que faltan en el maestro")
-    ap.add_argument("--benchmark", default=None, help="raiz del benchmark (default: ../homberger-<size>)")
-    ap.add_argument("--algos", nargs="+", default=ALGORITMOS)
     ap.add_argument("--iters", type=int, default=ITERACIONES)
     ap.add_argument("--runs", type=int, default=RUNS)
     ap.add_argument("--workers", type=int, default=MAX_WORKERS,

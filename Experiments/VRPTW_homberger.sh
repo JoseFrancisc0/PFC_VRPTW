@@ -10,11 +10,11 @@
 #SBATCH --error=vrptw_%j.err       # Errores y tracebacks de Python / C++
 
 # Pasos (desde Experiments/, en el nodo de login):
-#   1. git pull
-#   2. bash compilar.sh
-#   3. sbatch VRPTW_homberger.sh 600          (el numero es el tamaño; sin numero usa 800)
-# Lo que va despues del tamaño se pasa a automate.py, p.ej.:
-#   sbatch VRPTW_homberger.sh 600 --algos QLEARNING --master results/master_gh600_ql.csv
+#   1. bash compilar.sh                       (hace git pull y compila)
+#   2. sbatch VRPTW_homberger.sh 600          (el numero es el tamaño; sin numero usa 800)
+# Lo que va despues del tamaño se pasa a automate.py, p.ej. solo QLEARNING (results/master_gh600_ql.csv,
+# y al terminar actualiza results/master_gh600.csv):
+#   sbatch VRPTW_homberger.sh 600 --solo-ql
 
 SIZE="${1:-800}"
 shift
