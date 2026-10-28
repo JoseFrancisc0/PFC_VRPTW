@@ -32,20 +32,40 @@ int QTable::select(int state, double epsilon) {
     return ties[tie_distr(rng)];
 }
 
-void QTable::update(int state, int action, double reward, int next_state, double alpha, double gamma) {
+void QTable::record(int action, double reward) {
+    rewards[action] += reward;
+    uses[action]++;
+}
+
+void QTable::closeSegment(int state, int next_state, double alpha, double gamma) {
     double max_next = *std::max_element(q[next_state].begin(), q[next_state].end());
-    q[state][action] += alpha * (reward + (gamma * max_next) - q[state][action]);
+    for (size_t a = 0; a < uses.size(); ++a) {
+        if (uses[a] > 0) {
+            double avg_reward = rewards[a] / uses[a];
+            q[state][a] += alpha * (avg_reward + (gamma * max_next) - q[state][a]);
+        }
+        rewards[a] = 0.0;
+        uses[a] = 0;
+    }
 }
 
 ALNS_QLearning::ALNS_QLearning(const Solution& _initial_sol, const SolverParams& _params)
     : ALNS(_initial_sol, _params), destroy(NUM_STATES, NUM_DESTROY), repair(NUM_STATES, NUM_REPAIR) {}
 
-// Al empezar la fase 2 el agente pasa a sus estados, vuelve a explorar y reinicia la media de mejoras
+// El cambio de fase cierra el segmento en curso (su transicion lleva al primer estado de la fase 2).
+// Despues el agente vuelve a explorar y reinicia la media de mejoras
 void ALNS_QLearning::onDistancePhase(int iter) {
+    closeSegment(2);
     phase = 1;
-    state = 2;
     phase_start = iter;
     baseline = 0.0;
+}
+
+void ALNS_QLearning::closeSegment(int next_state) {
+    destroy.closeSegment(state, next_state, params.alpha, params.gamma);
+    repair.closeSegment(state, next_state, params.alpha, params.gamma);
+    state = next_state;
+    found_best = false;
 }
 
 // Igual en ambas fases: 1 durante la exploracion inicial (learning_loop de la fase) y luego decae
@@ -75,12 +95,11 @@ double ALNS_QLearning::reward(double improvement) {
     return r;
 }
 
-void ALNS_QLearning::learn(int, const Outcome& outcome) {
-    double improvement = params.eta * outcome.gain_best + (1.0 - params.eta) * outcome.gain_current;
-    double r = reward(improvement);
-    int next_state = 2 * phase + (improvement > 0.0 ? 1 : 0);
+void ALNS_QLearning::learn(int iter, const Outcome& outcome) {
+    double r = reward(params.eta * outcome.gain_best + (1.0 - params.eta) * outcome.gain_current);
+    destroy.record(d_idx, r);
+    repair.record(r_idx, r);
+    found_best = found_best || outcome.new_best;
 
-    destroy.update(state, d_idx, r, next_state, params.alpha, params.gamma);
-    repair.update(state, r_idx, r, next_state, params.alpha, params.gamma);
-    state = next_state;
+    if (iter % Roulette::SEGMENT_SIZE == 0) closeSegment(2 * phase + (found_best ? 1 : 0));
 }
