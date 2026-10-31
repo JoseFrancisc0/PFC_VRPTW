@@ -10,7 +10,6 @@ const double EXPLOIT_FROM = 0.15;
 // Sin mejora la recompensa es 0
 const double REWARD_CAP     = 2.0;
 const double BASELINE_DECAY = 0.9;
-
 }
 
 int QTable::select(int state, double epsilon) {
