@@ -18,9 +18,9 @@ Archivo & Contenido & Sección \\
 \cod{VRPTW Environment/instance.*} & Instancia, cliente, ruta; matrices precalculadas; recálculo de una ruta & \ref{sec:modelo} \\
 \cod{VRPTW Environment/solution.*} & Solución, función de costo, solución inicial & \ref{sec:modelo} \\
 \cod{Utils/params.h} & Parámetros ajustables del Q-learning (\cod{SolverParams}) & \ref{sec:ql} \\
-\cod{ALNS/alns.*} & Bucle común en dos fases (rutas y distancia): recocido simulado, aceptación, reinicio por estancamiento & \ref{sec:base} \\
-\cod{ALNS/alns\_classic.*} & Selección por ruleta con pesos adaptativos & \ref{sec:clasico} \\
-\cod{ALNS/alns\_qlearning.*} & Selección $\varepsilon$-voraz sobre una tabla $Q$ & \ref{sec:ql} \\
+\cod{ALNS/alns.*} & Bucle común en dos fases (rutas y distancia): recocido simulado, aceptación, reinicio por estancamiento; ganancias relativas; ruleta adaptativa (\cod{Roulette}) & \ref{sec:base} \\
+\cod{ALNS/alns\_classic.*} & Selección por dos ruletas (destrucción y reparación) & \ref{sec:clasico} \\
+\cod{ALNS/alns\_qlearning.*} & Selección $\varepsilon$-voraz con dos tablas $Q$ (destrucción y reparación) que aprenden por segmentos & \ref{sec:ql} \\
 \cod{Operators/operators.*} & Catálogo de operadores y grado de destrucción & \ref{sec:base} \\
 \cod{Operators/destroy\_ops.cpp} & Seis operadores de destrucción & \ref{sec:destruccion} \\
 \cod{Operators/repair\_ops.cpp} & Evaluación de inserción y cinco operadores de reparación & \ref{sec:reparacion} \\

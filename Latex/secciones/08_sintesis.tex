@@ -45,9 +45,10 @@ hasta $50\,000$ iteraciones por corrida sea alcanzable en las instancias de mayo
 
 \subsection{Diferencias entre los dos métodos}
 
-Como ambos métodos comparten todo lo anterior y parten de la misma solución inicial con la
-misma semilla, cualquier diferencia de resultados se origina en los aspectos de la
-Tabla~\ref{tab:comparacion}.
+Como ambos métodos comparten todo lo anterior, parten de la misma solución inicial con la
+misma semilla y además aprenden con el mismo ritmo (eligen en cada iteración y actualizan sus
+preferencias cada $100$ iteraciones), cualquier diferencia de resultados se origina en los
+aspectos de la Tabla~\ref{tab:comparacion}.
 
 \begin{table}[H]
 \centering
@@ -58,18 +59,16 @@ Tabla~\ref{tab:comparacion}.
 \toprule
 Aspecto & ALNS clásico & ALNS con Q-learning \\
 \midrule
-Unidad de decisión & Destrucción y reparación por separado ($6+5$ pesos) & Par conjunto ($30$ acciones) \\
-Contexto & Ninguno & Estado binario: si la iteración anterior mejoró \\
-Política & Sorteo proporcional a los pesos & $\varepsilon$-voraz, $\varepsilon\to 0.01$ \\
-Señal de crédito & Categoría del resultado: $33$, $13$, $9$, $0$ & Magnitud de la mejora relativa en su propio criterio, logarítmica, ponderada global/local y creciente en el tiempo \\
-Aceptación sin mejora & Se premia ($9$) & Se penaliza igual que un rechazo \\
-Iteración sin éxito & Puntaje $0$ & Recompensa negativa $-\tau\,\Omega$: la mejora media reciente del mejor par alternativo \\
-Frecuencia de actualización & Cada $100$ iteraciones & Cada iteración \\
-Memoria & Media móvil, $\lambda=0.9$ por segmento & Media móvil, $\alpha=0.5$ por visita \\
-Horizonte & Inmediato & Descontado, $\gamma=0.7$ \\
-Exploración & Permanente y proporcional ($w_{\min}=0.01$) & $200$ iteraciones uniformes al inicio de cada fase y después residual \\
-Cambio de fase & Sin reacción: los pesos continúan & Olvida las mejoras recientes y reinicia la exploración; conserva la tabla $Q$ \\
-Reparto de uso & Gradual entre todos los operadores & Concentrado en el par mejor valorado de cada estado \\
+Unidad de decisión & Destrucción y reparación por separado & Igual: dos tablas, destrucción y reparación \\
+Valores aprendidos & $6+5$ pesos & $4\times 6+4\times 5=44$ valores $Q$ \\
+Contexto & Ninguno & Estado: fase y si el segmento anterior encontró un nuevo mejor \\
+Política & Sorteo proporcional a los pesos & $\varepsilon$-voraz; $\varepsilon$ de $1$ a $0.1$ en cada fase \\
+Señal de crédito & Categoría del resultado: $33$, $13$, $9$, $0$ & Magnitud de la mejora relativa, dividida por la media móvil de mejoras y con tope $2$ \\
+Aceptación sin mejora & Se premia ($9$) & Recompensa $0$, igual que un rechazo \\
+Ritmo & Elige cada iteración; actualiza cada $100$ & Igual \\
+Actualización & Media móvil del puntaje medio, $\lambda=0.9$ & Q-learning con la recompensa media, $\alpha=0.1$ (misma inercia) y $\gamma=0.8$ \\
+Exploración & Permanente y proporcional ($w_{\min}=0.01$) & $1250$ iteraciones uniformes al inicio de cada fase, transición hasta la iteración $3750$ y después $10$\,\% al azar \\
+Cambio de fase & Sin reacción: los pesos continúan & Filas propias para la fase~2, nueva exploración y nueva escala de recompensas \\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -78,26 +77,26 @@ De la tabla se desprenden cuatro diferencias de comportamiento que conviene tene
 interpretar los resultados experimentales:
 
 \begin{itemize}
-\item \textbf{Sinergias entre operadores.} Solo el Q-learning puede aprender que un operador
-de destrucción rinde con un operador de reparación concreto: cada una de las seis
-destrucciones se valora por separado con cada una de las cinco reparaciones.
 \item \textbf{Qué se entiende por éxito.} El método clásico premia la aceptación, de modo que
 a temperatura alta refuerza a los operadores que generan soluciones aceptables aunque no
-mejoren. El Q-learning solo premia la mejora estricta y pondera su magnitud relativa, y
-penaliza cada fallo en proporción a lo que están rindiendo los demás pares.
-\item \textbf{Velocidad y concentración de la adaptación.} El método clásico modifica su
-distribución lentamente y mantiene en uso todo el catálogo; el Q-learning reacciona en pocas
-visitas y explota casi en exclusiva el par preferido de cada estado, cambiándolo cuando las
-penalizaciones lo desplazan. El primero es más estable y diverso; el segundo, más reactivo y
-más intensivo.
+mejoren. El Q-learning solo premia la mejora estricta y la pondera por su tamaño respecto de
+lo que se viene consiguiendo.
+\item \textbf{Sensibilidad a mejoras pequeñas.} Al final de la fase~2 casi todas las mejoras
+son pequeñas. Para la ruleta todas valen lo mismo ($13$ o $33$); el Q-learning, al dividir
+por la media reciente, sigue distinguiendo qué operador consigue las mayores dentro de esa
+escala reducida.
+\item \textbf{Concentración.} La ruleta mantiene en uso todo el catálogo en proporción a los
+pesos; el Q-learning, tras la exploración inicial, dedica el $90$\,\% de las elecciones al
+operador mejor valorado de cada estado. El primero es más diverso; el segundo, más
+intensivo.
 \item \textbf{Adaptación al cambio de objetivo.} Al pasar de eliminar rutas a reducir
 distancia, el método clásico arrastra los pesos de la fase~1 y los corrige al ritmo de su
-media móvil; el Q-learning vuelve a explorar todos los pares de forma explícita antes de
-explotar. La fase~1 es, además, la que decide el número de vehículos, y en ella ambos
-mecanismos disponen de un número de iteraciones variable (a lo sumo $T_{\max}$) para aprender.
+media móvil; el Q-learning empieza la fase~2 con filas nuevas y vuelve a explorar todos los
+operadores antes de explotar.
 \end{itemize}
 
-Estas afirmaciones describen el mecanismo, no su efecto medido. Para vincularlas con los
-resultados se recomienda acompañar las tablas comparativas con la frecuencia de uso de cada
-operador (o par) a lo largo de la búsqueda en ambos métodos, separada por fases, y con la
-duración de la fase~1.
+Estas afirmaciones describen el mecanismo, no su efecto medido. Los resultados de la
+Sección~\ref{sec:experimentos} muestran \emph{dónde} se traduce en una diferencia de calidad;
+para atribuirla a una de estas cuatro diferencias en concreto haría falta registrar la
+frecuencia de uso de cada operador por fase en ambos métodos, o ablaciones que activen una
+diferencia a la vez.

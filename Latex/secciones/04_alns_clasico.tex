@@ -3,9 +3,17 @@
 
 \cod{ALNS\_Classic} implementa el mecanismo adaptativo de Ropke y
 Pisinger~\cite{ropke2006}. Mantiene dos ruletas \emph{independientes}, una para los $6$
-operadores de destrucción y otra para los $5$ de reparación. Cada ruleta guarda, para cada
-operador $i$, un peso $w_i$ (inicialmente $1$), un puntaje acumulado $S_i$ y un contador de
-usos $u_i$ dentro del segmento en curso.
+operadores de destrucción y otra para los $5$ de reparación. Cada ruleta (estructura
+\cod{Roulette} de \cod{alns.h}) guarda, para cada operador $i$, un peso $w_i$ (inicialmente
+$1$), un puntaje acumulado $S_i$ y un contador de usos $u_i$ dentro del segmento en curso.
+
+La ruleta tiene tres operaciones, que definen el \emph{ritmo} de aprendizaje que también
+sigue el Q-learning (Sección~\ref{sec:ql}): \cod{select} elige un operador en cada
+iteración, \cod{record} acumula el resultado del operador usado y \cod{closeSegment}
+actualiza las preferencias cada $\ell=100$ iteraciones (\cod{SEGMENT\_SIZE}). En palabras
+simples: durante $100$ iteraciones se juega con los pesos actuales y se anota cómo le fue a
+cada operador; al terminar el bloque, los pesos se corrigen un $10$\,\% hacia el puntaje
+medio obtenido.
 
 \subsection{Selección}
 
@@ -48,7 +56,7 @@ Un operador que no se usó en el segmento conserva su peso. El Algoritmo~\ref{al
 reúne ambas operaciones.
 
 \begin{algorithm}[H]
-\caption{Selección y aprendizaje del ALNS clásico (\cod{ALNS\_Classic})}
+\caption{Selección y aprendizaje del ALNS clásico (\cod{ALNS\_Classic} y \cod{Roulette})}
 \label{alg:clasico}
 \SetKwProg{Proc}{procedimiento}{}{}
 \Proc{\textnormal{\fn{Seleccionar}($t$)}}{

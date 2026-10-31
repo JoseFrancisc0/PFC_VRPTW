@@ -1,286 +1,309 @@
 \section{ALNS con Q-learning}
 \label{sec:ql}
 
-\cod{ALNS\_QLearning} sustituye las dos ruletas por un agente de aprendizaje por refuerzo
-tabular que aplica Q-learning~\cite{watkins1992,sutton2018}. La elección de operadores se
-modela como un proceso de decisión con los siguientes elementos.
+\cod{ALNS\_QLearning} sustituye las dos ruletas del método clásico por dos tablas de
+Q-learning~\cite{watkins1992,sutton2018}. El diseño es deliberadamente \emph{simétrico} al del
+método clásico: se conservan las dos decisiones separadas (una para la destrucción y otra para
+la reparación), el mismo ritmo de aprendizaje (se elige en cada iteración y se aprende al
+cerrar cada segmento de $\ell=100$ iteraciones) y la misma forma de acumular el resultado de
+cada operador dentro del segmento. En el código, la estructura \cod{QTable} tiene los mismos
+tres métodos que \cod{Roulette} (Sección~\ref{sec:clasico}): \cod{select}, \cod{record} y
+\cod{closeSegment}.
 
-\begin{itemize}
-\item \textbf{Estados.} Dos estados, $z\in\{0,1\}$: $z=1$ si la iteración anterior produjo
-una mejora y $z=0$ en caso contrario. El estado inicial es $z=0$.
-\item \textbf{Acciones.} Cada acción es un \emph{par} $\theta=(j,k)$ de operador de
-destrucción y de reparación, codificado como $\theta=5j+k$. Hay $6\times 5=30$ acciones.
-\item \textbf{Tabla.} $Q\in\mathbb{R}^{2\times 30}$, inicializada en cero.
-\item \textbf{Memoria de mejoras.} Un vector $M\in\mathbb{R}^{30}$, inicializado en cero, con
-la mejora reciente de cada acción (\cod{recent\_improvement}); se usa para calcular el costo
-de oportunidad (Sección~\ref{sec:recompensa}).
-\end{itemize}
+\subsection{La idea en pocas palabras}
+\label{sec:ql-idea}
 
-A diferencia del método clásico, la unidad de decisión es el par completo: el agente puede
-aprender que una destrucción funciona con una reparación y no con otra. A cambio debe estimar
-$60$ valores en lugar de $11$ pesos.
+Lo que cambia respecto de la ruleta son tres cosas:
+\begin{enumerate}
+\item \textbf{Qué se premia.} La ruleta premia la \emph{categoría} del resultado
+($33/13/9/0$). El Q-learning premia \emph{cuánto} mejoró la candidata, medido en relación con
+las mejoras que se vienen obteniendo en la fase (Sección~\ref{sec:recompensa}). Una
+candidata que no mejora recibe $0$, aunque sea aceptada.
+\item \textbf{Cómo se elige.} La ruleta sortea en proporción a los pesos. El Q-learning es
+$\varepsilon$-voraz: con probabilidad $1-\varepsilon$ elige el operador de mayor valor y con
+probabilidad $\varepsilon$ uno al azar. $\varepsilon$ empieza en $1$ en cada fase y decae
+hasta $0.1$ (Sección~\ref{sec:ql-sel}).
+\item \textbf{Con qué contexto.} La ruleta tiene un único juego de pesos. El Q-learning tiene
+una fila de valores por \emph{estado}: en qué fase está la búsqueda y si el segmento anterior
+encontró una nueva mejor solución (Sección~\ref{sec:ql-estado}). Así, la preferencia por un
+operador puede ser distinta mientras se eliminan rutas que mientras se acorta la distancia, o
+cuando la búsqueda progresa que cuando está estancada.
+\end{enumerate}
+Todo lo demás (solución inicial, operadores, aceptación, temperatura, fases y semilla) es
+idéntico en los dos métodos (Sección~\ref{sec:alcance}).
 
 \begin{table}[H]
 \centering
 \small
-\caption{Parámetros del Q-learning (\cod{SolverParams}, valores por defecto). Todos pueden
-modificarse desde la línea de comandos con la sintaxis \cod{clave=valor}. La última fila es
-una constante de \cod{alns\_qlearning.cpp}, no un parámetro.}
+\caption{Parámetros del Q-learning. Los cinco primeros son campos de \cod{SolverParams}
+(\cod{Utils/params.h}) y pueden modificarse desde la línea de comandos con la sintaxis
+\cod{clave=valor}; los cuatro últimos son constantes del código.}
 \label{tab:params-ql}
 \begin{tabularx}{\textwidth}{@{}l c c L@{}}
 \toprule
 Parámetro & Símbolo & Valor & Función \\
 \midrule
-\cod{alpha} & $\alpha$ & $0.5$ & Tasa de aprendizaje \\
-\cod{gamma} & $\gamma$ & $0.7$ & Factor de descuento \\
-\cod{learning\_loop} & $T_{\mathrm{exp}}$ & $200$ & Iteraciones de exploración pura al inicio de la búsqueda y al inicio de la fase~2 \\
-\cod{beta} & $\beta$ & $0.99$ & Decaimiento multiplicativo de $\varepsilon$ por iteración \\
-\cod{epsilon\_min} & $\varepsilon_{\min}$ & $0.01$ & Exploración residual \\
-\cod{eta} & $\eta$ & $0.8$ & Peso de la mejora global frente a la local en la recompensa \\
-\cod{reward\_gain} & $\kappa$ & $10^4$ & Ganancia de la transformación logarítmica \\
+\cod{alpha} & $\alpha$ & $0.1$ & Tasa de aprendizaje de la tabla $Q$ \\
+\cod{gamma} & $\gamma$ & $0.8$ & Factor de descuento \\
+\cod{epsilon\_min} & $\varepsilon_{\min}$ & $0.1$ & Exploración residual: fracción de elecciones al azar tras el decaimiento \\
+\cod{learning\_loop} & $\phi_{\mathrm{exp}}$ & $0.05$ & Fracción de $T_{\max}$ con exploración pura al inicio de cada fase \\
+\cod{eta} & $\eta$ & $0.8$ & Peso de la ganancia sobre la mejor solución frente a la ganancia sobre la actual \\
 \midrule
-\cod{IMPROVEMENT\_DECAY} & $\delta$ & $0.9$ & Inercia de la memoria de mejoras $M$ \\
+\cod{EXPLOIT\_FROM} & $\phi_{\mathrm{expl}}$ & $0.15$ & Fracción de $T_{\max}$ en la que $\varepsilon$ alcanza $\varepsilon_{\min}$ \\
+\cod{REWARD\_CAP} & $r_{\max}$ & $2$ & Tope de la recompensa normalizada \\
+\cod{BASELINE\_DECAY} & $\beta$ & $0.9$ & Inercia de la media móvil de mejoras \\
+\cod{Roulette::SEGMENT\_SIZE} & $\ell$ & $100$ & Longitud del segmento (compartida con el método clásico) \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-\subsection{Selección de la acción}
+\subsection{Estados, acciones y tablas}
+\label{sec:ql-estado}
 
-La política es $\varepsilon$-voraz con un calendario de exploración en tres tramos
-(Algoritmo~\ref{alg:ql-sel}). Sea $t_0$ la iteración en la que comienza el calendario
-($t_0=0$ al inicio de la búsqueda) y $t_{\mathrm{exp}}=t_0+T_{\mathrm{exp}}$ la última
-iteración de exploración pura (\cod{explore\_until}):
+\begin{itemize}
+\item \textbf{Acciones.} Hay dos agentes que comparten estado y recompensa: uno elige entre
+los $6$ operadores de destrucción y otro entre los $5$ de reparación. Cada uno tiene su tabla,
+$Q^{-}\in\mathbb{R}^{4\times 6}$ y $Q^{+}\in\mathbb{R}^{4\times 5}$, inicializadas en cero. En
+total se estiman $44$ valores, frente a los $11$ pesos de la ruleta.
+\item \textbf{Estados.} Cuatro estados, codificados como
 \begin{equation}
-\varepsilon_t=
+z=2\,\textit{fase}+b,\qquad \textit{fase}\in\{0,1\},\quad b\in\{0,1\},
+\label{eq:estado}
+\end{equation}
+donde $\textit{fase}=0$ es la minimización de rutas, $\textit{fase}=1$ la de distancia, y
+$b=1$ si el segmento anterior produjo al menos un nuevo mejor (\cod{found\_best}). El estado
+inicial es $z=0$.
+\item \textbf{El estado solo cambia al cerrar un segmento.} Durante las $100$ iteraciones de
+un segmento el estado es fijo; las dos tablas se consultan siempre en la misma fila.
+\end{itemize}
+
+Como la fase forma parte del estado, las filas $z\in\{0,1\}$ solo se usan en la fase~1 y las
+filas $z\in\{2,3\}$ solo en la fase~2. En la práctica, cada fase aprende su propia preferencia
+de operadores partiendo de cero, y lo aprendido mientras se eliminaban rutas no condiciona la
+elección mientras se acorta la distancia. La única conexión entre ambas es el término de
+arrastre $\gamma\max Q$ de la última actualización de la fase~1 (Sección~\ref{sec:ql-fase2}).
+
+\subsection{Selección: política \texorpdfstring{$\varepsilon$}{epsilon}-voraz por fases}
+\label{sec:ql-sel}
+
+En cada iteración, cada agente elige su operador de forma independiente con la misma
+$\varepsilon$ (Algoritmo~\ref{alg:ql-sel}): con probabilidad $\varepsilon$ un operador
+uniformemente al azar y, en otro caso, el de mayor $Q(z,\cdot)$. Los empates (tolerancia
+$10^{-12}$) se resuelven al azar, lo que importa al principio, cuando todos los valores son
+cero.
+
+La exploración sigue un calendario que se reinicia al comenzar cada fase. Sea
+$t'=t-t_{\mathrm{ini}}-1$ el número de iteraciones transcurridas en la fase en curso
+($t_{\mathrm{ini}}=0$ en la fase~1 y la iteración de cambio en la fase~2) y sean
+\[
+t_{\mathrm{exp}}=\phi_{\mathrm{exp}}\,T_{\max}=1250,\qquad
+t_{\mathrm{expl}}=\max\bigl(t_{\mathrm{exp}}+1,\ \phi_{\mathrm{expl}}\,T_{\max}\bigr)=3750 .
+\]
+Entonces
+\begin{equation}
+\varepsilon(t')=
 \begin{cases}
-1 & t\le t_{\mathrm{exp}},\\[2pt]
-\max\bigl(\varepsilon_{\min},\ \beta^{\,t-t_{\mathrm{exp}}-1}\bigr) & t>t_{\mathrm{exp}}.
+1 & t'<t_{\mathrm{exp}},\\[3pt]
+\max\Bigl(\varepsilon_{\min},\ \varepsilon_{\min}^{\,(t'-t_{\mathrm{exp}})/(t_{\mathrm{expl}}-t_{\mathrm{exp}})}\Bigr) & t'\ge t_{\mathrm{exp}}.
 \end{cases}
 \label{eq:eps}
 \end{equation}
-
+Es decir, cada fase tiene tres tramos:
 \begin{enumerate}
-\item \emph{Calentamiento} (las primeras $200$ iteraciones): las acciones se eligen
-uniformemente al azar. Cada par se prueba en promedio $200/30\approx 7$ veces y la tabla se
-actualiza con normalidad, de modo que al terminar ya contiene una primera estimación de todos
-los pares.
-\item \emph{Transición} (las $459$ siguientes): $\varepsilon$ decae geométricamente desde $1$
-y llega a $\varepsilon_{\min}$, pues $\lceil\ln 0.01/\ln 0.99\rceil=459$.
-\item \emph{Explotación} (a partir de la iteración $660$ del calendario, aproximadamente):
-$\varepsilon=0.01$ y el 99\,\% de las decisiones son voraces.
+\item \emph{Exploración pura} (las primeras $1250$ iteraciones): elecciones uniformes. Cada
+operador de destrucción se prueba unas $200$ veces y cada reparación unas $250$; la tabla se
+actualiza con normalidad en este tramo.
+\item \emph{Transición} (de la iteración $1250$ a la $3750$ de la fase): $\varepsilon$ decae
+de forma exponencial desde $1$ hasta $0.1$.
+\item \emph{Explotación} (desde la iteración $3750$ de la fase): $\varepsilon=0.1$; nueve de
+cada diez elecciones son voraces.
 \end{enumerate}
-
-El calendario se recorre \emph{dos veces}: una desde el inicio de la búsqueda y otra desde el
-inicio de la fase~2 (Sección~\ref{sec:ql-fase2}). En la fase~2, que dura
-$T_{\max}=25\,000$ iteraciones, más del 97\,\% transcurre en explotación. La fase~1 tiene
-duración variable; si termina antes de unas $660$ iteraciones, su calendario queda truncado y
-toda ella transcurre en calentamiento o transición.
-
-En la rama voraz se elige la acción de mayor valor en el estado actual. Los empates (con
-tolerancia $10^{-12}$) se resuelven al azar, lo que evita un sesgo sistemático hacia las
-acciones de índice bajo mientras la tabla conserva valores iguales.
+Los umbrales se miden sobre $T_{\max}$ y no sobre la duración real de la fase, que en la
+fase~1 es variable: si se midieran sobre ella, una fase~1 corta quedaría casi entera al azar
+y una larga apenas exploraría. En la fase~2, que dura exactamente $T_{\max}=25\,000$
+iteraciones, el $85$\,\% transcurre en explotación. Una fase~1 que termina antes de $1250$
+iteraciones transcurre completa con elección uniforme.
 
 \begin{algorithm}[H]
-\caption{Selección $\varepsilon$-voraz (\cod{ALNS\_QLearning::selectOperators})}
+\caption{Selección $\varepsilon$-voraz (\cod{ALNS\_QLearning::selectOperators} y \cod{QTable::select})}
 \label{alg:ql-sel}
-\Entrada{iteración $t$; estado $z$; tabla $Q$; exploración actual $\varepsilon$; fin de la exploración pura $t_{\mathrm{exp}}$}
-\Salida{par $(j,k)$; se memoriza la acción $\theta$}
-$\varepsilon_t\gets 1$ si $t\le t_{\mathrm{exp}}$; si no, $\varepsilon$\;
-\uSi{$\unif{0}{1}<\varepsilon_t$}{
-  $\theta\sim\unifint{0}{29}$ \Com*[r]{exploración}
+\SetKwProg{Proc}{procedimiento}{}{}
+\Proc{\textnormal{\fn{Seleccionar}($t$)}}{
+  $\varepsilon\gets\varepsilon(t-t_{\mathrm{ini}}-1)$ según~\eqref{eq:eps}\;
+  $j\gets$ \fn{ElegirEn}($Q^{-}$, $z$, $\varepsilon$);\quad $k\gets$ \fn{ElegirEn}($Q^{+}$, $z$, $\varepsilon$)\;
+  \Devolver $(j,k)$\;
 }
-\SiNo{
-  $Q^\star\gets\max_{\theta'}Q(z,\theta')$\;
-  $\theta\gets$ elemento al azar de $\{\theta':Q(z,\theta')\ge Q^\star-10^{-12}\}$ \Com*[r]{explotación}
+\Proc{\textnormal{\fn{ElegirEn}($Q$, $z$, $\varepsilon$)}}{
+  \lSi{$\unif{0}{1}<\varepsilon$}{\Devolver una acción uniformemente al azar \Com*[f]{exploración}}
+  $Q^\star\gets\max_{a}Q(z,a)$\;
+  \Devolver un elemento al azar de $\{a:Q(z,a)\ge Q^\star-10^{-12}\}$ \Com*[r]{explotación}
 }
-\Devolver $(\lfloor\theta/5\rfloor,\ \theta\bmod 5)$\;
 \end{algorithm}
 
-\subsection{Función de recompensa}
+\subsection{Recompensa: mejora relativa normalizada}
 \label{sec:recompensa}
 
-La recompensa se construye a partir de las dos ganancias relativas que calcula el bucle común
-(Sección~\ref{sec:ganancia}), ambas medidas \emph{antes} de actualizar $x$ y $\xbest$:
-\[
-\gbest_t=G(\xbest,x'),\qquad \gcur_t=G(x,x'),
-\]
-con $G$ definida en~\eqref{eq:ganancia}: la mejora relativa en el primer criterio (clientes
-sin asignar, vehículos o distancia) en que la candidata difiere de la referencia.
-
-\paragraph{1. Transformación logarítmica.} Cada ganancia se transforma con
+La recompensa de una iteración se construye a partir de las dos ganancias relativas que
+calcula el bucle común (Sección~\ref{sec:ganancia}), ambas medidas antes de actualizar $x$ y
+$\xbest$: $\gbest=G(\xbest,x')$ respecto de la mejor solución y $\gcur=G(x,x')$ respecto de la
+actual. Se combinan en una mejora
 \begin{equation}
-\varphi(g)=\ln(1+\kappa\,g)\ \text{ si } g>0,\qquad \varphi(g)=0\ \text{ si } g\le 0 .
-\label{eq:phi}
-\end{equation}
-Su papel se entiende a partir de las escalas de $G$. Una reducción de distancia $\Delta D$
-produce $g=\Delta D/D$, un valor pequeño (por ejemplo, $10^{-3}$ al ahorrar $5$ unidades
-sobre $5000$); ahorrar un vehículo produce
-$g=1/K$ y colocar $c$ clientes del banco produce $g=c/|\Uns|$, valores uno o varios órdenes de
-magnitud mayores. Con $\kappa=10^{4}$ se obtiene
-\[
-\varphi=\ln\Bigl(1+10^{4}\,\frac{\Delta D}{D}\Bigr),\qquad
-\varphi=\ln\Bigl(1+\frac{10^{4}}{K}\Bigr),\qquad
-\varphi=\ln\Bigl(1+10^{4}\,\frac{c}{|\Uns|}\Bigr),
-\]
-respectivamente. La ganancia $\kappa$ fija la resolución de la señal: las mejoras relativas
-menores que $1/\kappa=10^{-4}$ quedan en el tramo casi lineal de $\varphi$ y las mayores se
-comprimen. El logaritmo impide así que los avances en los criterios prioritarios sepulten la
-señal de las mejoras de distancia, sin dejar de ordenarlos: por ejemplo, con $K=20$ y
-$D=5000$, ahorrar $10$ unidades de distancia da $\varphi\approx 3.0$, eliminar un vehículo da
-$\varphi\approx 6.2$ y colocar uno de $8$ clientes pendientes da $\varphi\approx 7.1$. Las
-ganancias por clientes colocados son las características de la fase~1; en la fase~2
-predominan las de distancia.
-
-\paragraph{2. Combinación global--local.} Las dos ganancias transformadas se mezclan con peso
-$\eta=0.8$:
-\begin{equation}
-I_t=\eta\,\varphi(\gbest_t)+(1-\eta)\,\varphi(\gcur_t).
+I=\eta\,\gbest+(1-\eta)\,\gcur,\qquad \eta=0.8,
 \label{eq:mejora}
 \end{equation}
-Como $\xbest$ nunca es peor que $x$, una ganancia global positiva implica una ganancia local
-positiva; por tanto $I_t>0$ si y solo si la candidata mejora a la solución actual. Una mejora
-solo local recibe el 20\,\% de su valor transformado; un nuevo mejor recibe además el 80\,\%
-de $\varphi(\gbest_t)$. El agente es recompensado por cualquier progreso, pero sobre todo por
-superar el mejor conocido.
+que da más peso a superar la mejor solución que a mejorar solo la actual. Si $I=0$ (la
+candidata no mejora la solución actual en su primer criterio distinto, aunque sea aceptada) la
+recompensa es $0$.
 
-\paragraph{3. Escalado temporal.} La recompensa se multiplica por la fracción de búsqueda
-transcurrida, $\tau_t=t/T_{\mathrm{fin}}\in(0,1]$, donde $T_{\mathrm{fin}}$ es la última
-iteración prevista en ese momento (Algoritmo~\ref{alg:alns}). Las mejoras son abundantes al
-principio y escasas al final; el factor $\tau_t$ da más valor a las mejoras tardías, que son
-las difíciles, y reduce el peso de las tempranas, que casi cualquier operador consigue. Como
-$T_{\mathrm{fin}}=2\,T_{\max}$ durante la fase~1 y $T_{\mathrm{fin}}=t_1+T_{\max}$ durante la
-fase~2 (con $t_1$ la iteración en que acabó la fase~1), $\tau_t$ no supera $0.5$ en la fase~1
-y crece desde $t_1/(t_1+T_{\max})$ hasta $1$ en la fase~2.
-
-\paragraph{4. Costo de oportunidad.} El agente mantiene, para cada acción $\theta$, una media
-móvil exponencial $M_\theta$ de la mejora $I$ que ha producido en sus usos recientes, contando
-como $0$ los usos sin mejora. Una iteración sin mejora no recibe recompensa nula sino
-negativa, igual a la mayor mejora reciente \emph{de las demás acciones}:
+Si $I>0$, la mejora se divide por una media móvil $\bar{I}$ de las mejoras positivas
+observadas en la fase, con un tope, siguiendo la normalización de Kou et al.~\cite{kou2026}
+(\cod{ALNS\_QLearning::reward}):
 \begin{equation}
-r_t=
+r=
 \begin{cases}
-\tau_t\,I_t & \text{si } I_t>0,\\[2pt]
--\,\tau_t\,\Omega_t & \text{si } I_t=0,
+0 & I=0,\\
+1 & I>0 \text{ y no hay aún media } (\bar{I}=0),\\
+\min\bigl(I/\bar{I},\ r_{\max}\bigr) & I>0 \text{ y } \bar{I}>0,
 \end{cases}
-\qquad\text{con}\quad \Omega_t=\max_{\theta'\neq\theta}M_{\theta'} .
 \label{eq:recompensa}
 \end{equation}
-Calculada la recompensa, se actualiza la memoria de la acción usada, haya o no mejora:
+con $r_{\max}=2$. Después de calcular $r$, y solo si $I>0$, se actualiza la media:
 \begin{equation}
-M_\theta\gets\delta\,M_\theta+(1-\delta)\,I_t,\qquad \delta=0.9 .
-\label{eq:memoria}
+\bar{I}\gets
+\begin{cases}
+I & \text{si } \bar{I}=0,\\
+\beta\,\bar{I}+(1-\beta)\,I & \text{en otro caso,}
+\end{cases}
+\qquad \beta=0.9 .
+\label{eq:media}
 \end{equation}
-La interpretación es que una iteración desperdiciada cuesta lo que se habría podido ganar con
-la mejor alternativa. $M_\theta$ estima la mejora \emph{media por uso} de la acción $\theta$
-sobre una ventana efectiva de unos $1/(1-\delta)=10$ usos, de modo que combina con qué
-frecuencia mejora y cuánto. De la definición se siguen tres propiedades:
-\begin{itemize}
-\item la penalización es \emph{adaptativa}: sube cuando alguna otra acción está produciendo
-mejoras y se anula cuando ninguna lo hace, en cuyo caso fallar no cuesta nada;
-\item al excluir a la propia acción del máximo, un par no se ve penalizado por sus propios
-éxitos anteriores, sino solo por lo que ofrecen las alternativas;
-\item $M_\theta$ solo cambia cuando $\theta$ se usa, por lo que el valor de una acción poco
-elegida refleja la última vez que se probó y no decae mientras tanto.
-\end{itemize}
-Las candidatas rechazadas reciben esta misma penalización, igual que las aceptadas que no
-mejoran: a diferencia del método clásico, la aceptación sin mejora no se premia.
+Así, cada mejora se compara con las anteriores, y solo con mejoras positivas.
 
-\subsection{Actualización de la tabla}
+\paragraph{Por qué normalizar.} Las ganancias de~\eqref{eq:ganancia} tienen escalas muy
+distintas: colocar un cliente del banco vale $1/|\Uns|$ (del orden de $10^{-1}$), mientras que
+una mejora de distancia vale $\Delta D/D$ (del orden de $10^{-4}$ a $10^{-3}$ y cada vez menor
+a medida que avanza la búsqueda). Con la recompensa sin normalizar, la tabla quedaría dominada
+por los primeros éxitos y las mejoras tardías, que son las difíciles, apenas la moverían. El
+cociente $I/\bar{I}$ expresa cada mejora como «cuántas veces mejor que lo habitual en este
+momento», una escala que no depende del tamaño de la instancia ni de la etapa de la búsqueda:
+$r\approx 1$ es una mejora típica, $r<1$ una mejora pequeña y $r=2$ una mejora al menos el
+doble de la habitual. El tope evita que una mejora excepcional (por ejemplo, vaciar el banco
+en la fase~1 tras una racha de mejoras de distancia) sature la tabla. La media $\bar{I}$ se
+reinicia al comenzar la fase~2 (Sección~\ref{sec:ql-fase2}) y no entre etapas de la fase~1.
 
-El siguiente estado es $z'=1$ si $I_t>0$ y $z'=0$ en caso contrario, y se aplica la regla de
-Q-learning~\cite{watkins1992}:
+\paragraph{Acumulación por segmento.} Dentro de un segmento, cada agente suma la recompensa
+de la iteración al operador que eligió y cuenta un uso más (\cod{QTable::record}). Los dos
+agentes reciben la misma recompensa, igual que en la ruleta ambos operadores reciben el mismo
+puntaje.
+
+\subsection{Actualización de la tabla al cerrar el segmento}
+\label{sec:ql-update}
+
+Cada $\ell=100$ iteraciones (cuando $t\bmod 100=0$) se cierra el segmento. El siguiente estado
+es $z'=2\,\textit{fase}+b$, con $b=1$ si en el segmento hubo algún nuevo mejor. Para cada
+operador $a$ usado $u_a>0$ veces en el segmento, con recompensa acumulada $S_a$, se aplica la
+regla de Q-learning con la recompensa \emph{media} del segmento:
 \begin{equation}
-Q(z,\theta)\gets Q(z,\theta)+\alpha\Bigl[r_t+\gamma\max_{\theta'}Q(z',\theta')-Q(z,\theta)\Bigr].
+Q(z,a)\gets Q(z,a)+\alpha\Bigl[\frac{S_a}{u_a}+\gamma\max_{a'}Q(z',a')-Q(z,a)\Bigr],
+\qquad \alpha=0.1,\quad\gamma=0.8 .
 \label{eq:qlearning}
 \end{equation}
-El Algoritmo~\ref{alg:ql-apr} resume el paso de aprendizaje completo, que se ejecuta en
-\emph{todas} las iteraciones de las dos fases, incluidas las de calentamiento.
+Los operadores no usados conservan su valor. Después se ponen a cero los acumuladores, el
+estado pasa a ser $z'$ y $b$ vuelve a falso. El Algoritmo~\ref{alg:ql-apr} resume el paso de
+aprendizaje.
 
 \begin{algorithm}[H]
-\caption{Aprendizaje por Q-learning (\cod{ALNS\_QLearning::learn})}
+\caption{Aprendizaje por Q-learning (\cod{learn} y \cod{QTable::closeSegment})}
 \label{alg:ql-apr}
-\Entrada{iteración $t$; resultado $o$; estado $z$ y acción $\theta$ de la iteración}
-$I\gets\eta\,\varphi(o.\gbest)+(1-\eta)\,\varphi(o.\gcur)$\;
-$\tau\gets t/T_{\mathrm{fin}}$\;
-\uSi{$I>0$}{
-  $r\gets\tau\,I$;\quad $z'\gets 1$\;
+\SetKwProg{Proc}{procedimiento}{}{}
+\Proc{\textnormal{\fn{Aprender}($t$, $o$)}}{
+  $r\gets$ \fn{Recompensa}($\eta\,o.\gbest+(1-\eta)\,o.\gcur$) \Com*[r]{ec.~\eqref{eq:recompensa}}
+  $S^{-}_j\gets S^{-}_j+r$;\quad $u^{-}_j\gets u^{-}_j+1$\;
+  $S^{+}_k\gets S^{+}_k+r$;\quad $u^{+}_k\gets u^{+}_k+1$\;
+  $b\gets b\ \vee\ o.\textit{nuevoMejor}$\;
+  \lSi(\Com*[f]{cierre de segmento}){$t\bmod 100=0$}{\fn{CerrarSegmento}($2\,\textit{fase}+b$)}
 }
-\SiNo{
-  $\Omega\gets\max_{\theta'\neq\theta}M_{\theta'}$ \Com*[r]{costo de oportunidad}
-  $r\gets-\tau\,\Omega$;\quad $z'\gets 0$\;
+\Proc{\textnormal{\fn{CerrarSegmento}($z'$)}}{
+  \ParaCada{tabla $Q\in\{Q^{-},Q^{+}\}$}{
+    $m\gets\max_{a'}Q(z',a')$\;
+    \ParaCada{acción $a$ de la tabla}{
+      \lSi{$u_a>0$}{$Q(z,a)\gets Q(z,a)+\alpha\bigl[S_a/u_a+\gamma\,m-Q(z,a)\bigr]$}
+      $S_a\gets 0$;\quad $u_a\gets 0$\;
+    }
+  }
+  $z\gets z'$;\quad $b\gets\text{falso}$\;
 }
-$M_\theta\gets\delta\,M_\theta+(1-\delta)\,I$\;
-$Q(z,\theta)\gets Q(z,\theta)+\alpha\bigl[r+\gamma\max_{\theta'}Q(z',\theta')-Q(z,\theta)\bigr]$\;
-$z\gets z'$\;
-\lSi{$t>t_{\mathrm{exp}}$}{$\varepsilon\gets\max(\varepsilon_{\min},\ \beta\,\varepsilon)$}
 \end{algorithm}
 
-\subsection{Reacción al cambio de fase}
+\paragraph{Relación con la ruleta.} Con $\gamma=0$, la regla~\eqref{eq:qlearning} es
+exactamente la media móvil de la ruleta~\eqref{eq:pesos} con $\lambda=1-\alpha=0.9$, aplicada
+a la recompensa media del segmento en lugar del puntaje medio. Ambos métodos tienen, por
+tanto, la misma inercia: cada segmento aporta el $10$\,\% del valor nuevo. Las diferencias
+efectivas son la señal (magnitud normalizada frente a categoría), la regla de elección
+(voraz frente a proporcional), la fila según el estado y el término de arrastre $\gamma\max Q$,
+que valora un operador también por la situación a la que conduce (por ejemplo, a un estado
+$b=1$ en el que se viene progresando).
+
+\paragraph{Escala de los valores.} Como $0\le S_a/u_a\le r_{\max}$, los valores quedan en
+$[0,\ r_{\max}/(1-\gamma)]=[0,10]$. Para un operador que se usa en todos los segmentos de un
+mismo estado, $Q$ tiende a $\bar{r}_a+\gamma\max Q$; la diferencia entre dos operadores de la
+misma fila la determina, por tanto, su recompensa media por uso, que combina con qué
+frecuencia mejoran y cuánto.
+
+\subsection{Cambio de fase}
 \label{sec:ql-fase2}
 
-Al comenzar la fase~2 el objetivo efectivo de la búsqueda cambia: deja de consistir en colocar
-clientes pendientes y pasa a ser reducir la distancia de una solución completa. Los pares
-que mejor vaciaban el banco no tienen por qué ser los que mejor acortan rutas. El agente
-recibe el aviso \fn{AlIniciarFase2} del bucle común (Algoritmo~\ref{alg:etapa}) y responde
-como indica el Algoritmo~\ref{alg:ql-fase2}.
+Al comenzar la fase~2 el objetivo efectivo cambia: deja de consistir en colocar clientes
+pendientes y pasa a ser acortar una solución completa. El bucle común avisa a la subclase con
+\fn{AlIniciarFase2} (Algoritmo~\ref{alg:etapa}), y el Q-learning responde como indica el
+Algoritmo~\ref{alg:ql-fase2}.
 
 \begin{algorithm}[H]
 \caption{Inicio de la fase 2 en el Q-learning (\cod{ALNS\_QLearning::onDistancePhase})}
 \label{alg:ql-fase2}
 \Entrada{iteración $t$ en la que comienza la fase 2}
-$M_\theta\gets 0$ para toda acción $\theta$ \Com*[r]{se olvidan las mejoras de la fase 1}
-$\varepsilon\gets 1$;\quad $t_{\mathrm{exp}}\gets t+T_{\mathrm{exp}}$ \Com*[r]{se vuelve a explorar}
+\fn{CerrarSegmento}($2$) \Com*[r]{cierra el segmento en curso; pasa al estado $z=2$}
+$\textit{fase}\gets 1$;\quad $t_{\mathrm{ini}}\gets t$ \Com*[r]{reinicia el calendario de $\varepsilon$}
+$\bar{I}\gets 0$ \Com*[r]{olvida la escala de mejoras de la fase 1}
 \end{algorithm}
 
 \begin{itemize}
-\item \textbf{Memoria de mejoras a cero.} Las mejoras de la fase~1 están en la escala de los
-clientes colocados ($\varphi\approx 7.1$ en el ejemplo anterior, y hasta
-$\ln(1+10^{4})\approx 9.2$ al colocar el último cliente pendiente) y no son alcanzables en la
-fase~2. Si se conservaran, el costo de oportunidad penalizaría cada iteración sin mejora
-con una magnitud que ningún par puede ya compensar.
-\item \textbf{Nuevo calendario de exploración.} Se repiten las $200$ iteraciones uniformes y
-el decaimiento de $\varepsilon$ de~\eqref{eq:eps}, ahora con $t_0$ igual a la iteración de
-inicio de la fase~2, para que todos los pares vuelvan a evaluarse con el nuevo objetivo.
-\item \textbf{La tabla $Q$ y el estado se conservan.} Los valores aprendidos en la fase~1 son
-el punto de partida de la fase~2; con $\alpha=0.5$ y la nueva exploración uniforme, se
-sobrescriben en pocas visitas a cada celda.
+\item \textbf{Cierre del segmento parcial.} Lo acumulado desde el último cierre se aprende con
+la transición a $z'=2$, el primer estado de la fase~2. Los segmentos siguientes se cierran,
+como siempre, en las iteraciones múltiplo de $100$, de modo que el primer segmento de la
+fase~2 puede ser más corto.
+\item \textbf{Nuevo calendario de exploración.} La fase~2 vuelve a empezar con
+$1250$ iteraciones uniformes y el decaimiento de~\eqref{eq:eps}, de modo que todos los
+operadores se evalúan con el nuevo objetivo.
+\item \textbf{Nueva escala de recompensas.} Las mejoras de la fase~1 (clientes colocados,
+vehículos eliminados) son órdenes de magnitud mayores que las de distancia; si $\bar{I}$ se
+conservara, las primeras mejoras de la fase~2 recibirían recompensas casi nulas.
+\item \textbf{La tabla se conserva.} No hace falta borrarla: por~\eqref{eq:estado}, la
+fase~2 usa filas que la fase~1 no tocó.
 \end{itemize}
-Las etapas sucesivas de la fase~1, en cambio, comparten objetivo y no provocan ningún
-reinicio del agente: la tabla, la memoria de mejoras y $\varepsilon$ continúan de una etapa a
-la siguiente.
+Las etapas sucesivas de la fase~1 comparten objetivo y no reinician nada: la tabla, el estado,
+$\bar{I}$ y $\varepsilon$ continúan de una etapa a la siguiente.
 
 \subsection{Propiedades relevantes}
 
 \begin{itemize}
-\item \textbf{Memoria corta.} Con tasa constante $\alpha=0.5$, el valor $Q(z,\theta)$ es una
-media con pesos $2^{-1},2^{-2},\dots$ sobre los objetivos de las últimas visitas a esa celda:
-las dos visitas más recientes concentran el 75\,\% del valor. La estimación reacciona de
-inmediato a los cambios de régimen de la búsqueda, lo cual es deseable porque el problema es
-no estacionario (la utilidad de un operador depende de la fase, de la temperatura y de la
-calidad de la solución actual), pero también es ruidosa.
-\item \textbf{Recompensa no estacionaria por diseño.} El factor $\tau_t$ hace que la escala de
-las recompensas, positivas y negativas, aumente a lo largo de cada fase, y el costo de
-oportunidad $\Omega_t$ sube y baja con el rendimiento reciente de los pares; una tasa de
-aprendizaje alta es coherente con esa elección.
-\item \textbf{Premios y penalizaciones en la misma escala.} La penalización de una iteración
-sin mejora es una mejora \emph{media por uso}, no la mayor mejora observada. Para un par que
-mejora con frecuencia $p$ y mejora media $\bar{I}$ cuando lo hace, la recompensa esperada
-de~\eqref{eq:recompensa} es aproximadamente $\tau\,[\,p\,\bar{I}-(1-p)\,\Omega\,]$, mientras
-que su propia memoria tiende a $M_\theta\approx p\,\bar{I}$. En consecuencia, la recompensa
-esperada de un par es positiva cuando su mejora media por uso supera, aproximadamente, a la de
-la mejor alternativa, y negativa en caso contrario: la señal compara cada par con el mejor de
-los demás, combinando frecuencia y magnitud de las mejoras. Esta es una consecuencia analítica
-de la fórmula; puede contrastarse empíricamente registrando la evolución de la tabla $Q$, de
-$M$ y de la frecuencia de uso de cada par.
-\item \textbf{Papel del estado.} El estado distingue la situación «se acaba de mejorar» de
-«no se acaba de mejorar». Puesto que las mejoras son minoritarias, $z=0$ es el estado
-dominante y su fila es la que se actualiza con más frecuencia; la fila $z=1$ captura qué par
-conviene aplicar inmediatamente después de un éxito (por ejemplo, insistir con un operador
-intensivo). El término $\gamma\max_{\theta'}Q(z',\theta')$ propaga a cada par el valor de la
-situación a la que conduce.
-\item \textbf{Concentración.} Con $\varepsilon_{\min}=0.01$, el método concentra casi todas las
-iteraciones en el par mejor valorado de cada estado, y cambia de par cuando las
-penalizaciones acumuladas lo hacen caer por debajo de otro. El reparto de uso entre operadores
-es, por tanto, mucho más desigual y más cambiante que el de la ruleta, que reparte en
-proporción a los pesos.
+\item \textbf{Mismo ritmo que la ruleta.} Elegir en cada iteración y aprender cada $100$
+iteraciones con la recompensa media del segmento hace que cada actualización se base en
+decenas de usos de cada operador y no en un resultado aislado, que en el ALNS es muy ruidoso
+(depende del grado $q$, del ruido y de la temperatura).
+\item \textbf{Solo se premia la mejora.} A diferencia del método clásico, una candidata
+aceptada que no mejora recibe $0$, igual que una rechazada. El agente no refuerza operadores
+que solo generan soluciones aceptables a temperatura alta.
+\item \textbf{Crédito proporcional a la magnitud.} Dos operadores con la misma tasa de éxito
+reciben valores distintos si uno produce mejoras mayores; con la ruleta, ambos recibirían el
+mismo puntaje.
+\item \textbf{Explotación concentrada con exploración residual.} Tras la transición, el
+$90$\,\% de las elecciones de cada agente recae en el operador mejor valorado de su fila; el
+$10$\,\% restante mantiene en uso al resto del catálogo y permite que la preferencia cambie
+si otro operador empieza a rendir más. La ruleta, en cambio, reparte siempre en proporción a
+los pesos.
+\item \textbf{Contexto.} El estado distingue «la búsqueda progresa» ($b=1$) de «la búsqueda
+está estancada» ($b=0$) y separa por completo las dos fases.
+\item \textbf{Costo despreciable.} Elegir y actualizar cuesta $\bigO(6+5)$ por iteración y por
+cierre de segmento, frente al costo de la reparación (Sección~\ref{sec:reparacion}).
 \end{itemize}

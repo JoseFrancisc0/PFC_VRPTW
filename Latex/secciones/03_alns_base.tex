@@ -7,6 +7,32 @@ Algoritmo~\ref{alg:alns} reproduce el método \cod{ALNS::solve}, común a los do
 tesis. Las llamadas \fn{Seleccionar} y \fn{Aprender} son los dos únicos puntos de variación
 (Secciones~\ref{sec:clasico} y~\ref{sec:ql}).
 
+\subsection{Idea general}
+\label{sec:idea}
+
+Una iteración del ALNS hace siempre lo mismo, sea cual sea el mecanismo de selección:
+\begin{enumerate}
+\item \textbf{Elegir.} Se elige un operador de destrucción y uno de reparación
+(\fn{Seleccionar}). Es la única decisión que toma el mecanismo adaptativo.
+\item \textbf{Destruir.} Sobre una copia de la solución actual $x$, el operador de
+destrucción saca de sus rutas entre $q_{\min}$ y $q_{\max}$ clientes (como máximo $60$) y los
+deja sin asignar.
+\item \textbf{Reparar.} El operador de reparación vuelve a insertar esos clientes en las rutas
+existentes, uno a uno y siempre de forma factible. El resultado es la candidata $x'$.
+\item \textbf{Evaluar y aceptar.} Si $x'$ es mejor que $x$ se acepta; si es peor, se acepta
+con la probabilidad del recocido simulado, que disminuye a medida que la temperatura baja. Si
+$x'$ es la mejor solución vista, se guarda en $\xbest$.
+\item \textbf{Aprender.} El resultado de la iteración (nuevo mejor, mejora, aceptada o
+rechazada, y cuánto mejoró) se entrega al mecanismo adaptativo (\fn{Aprender}), que lo usa
+para cambiar sus preferencias futuras.
+\end{enumerate}
+El adjetivo \emph{adaptativa} se refiere a ese último paso: los operadores que funcionan bien
+en la instancia y en la etapa de búsqueda en curso se eligen más a menudo. Los dos métodos de
+la tesis comparten los pasos 2 a 4 sin ninguna diferencia y solo difieren en cómo implementan
+los pasos 1 y 5 (Tabla~\ref{tab:comparacion}).
+
+\subsection{Bucle principal}
+
 La búsqueda se organiza en \emph{dos fases}, siguiendo el esquema de Ropke y
 Pisinger~\cite{ropke2006}: la fase~1 minimiza el número de rutas y la fase~2 minimiza la
 distancia con la flota obtenida. Ambas ejecutan exactamente el mismo cuerpo de iteración; lo
@@ -151,9 +177,10 @@ devuelta es completa.
 \paragraph{Reinicio de la búsqueda en cada etapa.} Al comenzar cada etapa de la fase~1, y al
 comenzar la fase~2, se restablecen $x$, $\xbest$, la temperatura ($T\gets T_0$) y los
 contadores de estancamiento. En cambio, el estado del mecanismo de selección (los pesos de
-las ruletas o la tabla $Q$) \emph{se conserva} entre etapas y entre fases; el único aviso que
+las ruletas o las tablas $Q$) \emph{se conserva} entre etapas y entre fases; el único aviso que
 reciben las subclases es \fn{AlIniciarFase2}, que el método clásico ignora y el Q-learning
-aprovecha para volver a explorar (Sección~\ref{sec:ql-fase2}). Obsérvese que dentro de una
+aprovecha para pasar a las filas de la fase~2, volver a explorar y reiniciar la escala de sus
+recompensas (Sección~\ref{sec:ql-fase2}). Obsérvese que dentro de una
 etapa de la fase~1 $\xbest$ es la mejor solución \emph{de esa etapa}, normalmente incompleta;
 la mejor solución completa se guarda aparte en $\bar{x}$.
 
@@ -270,7 +297,7 @@ fase~1 se aprende como cualquier otra.
 \label{sec:catalogo}
 
 El Algoritmo~\ref{alg:aplicar} muestra cómo se aplica el par elegido. Hay $6$ operadores de
-destrucción y $5$ de reparación (Tabla~\ref{tab:catalogo}), es decir, $30$ pares posibles.
+destrucción y $5$ de reparación (Tabla~\ref{tab:catalogo}), que ambos métodos eligen por separado.
 
 \begin{algorithm}[H]
 \caption{\fn{AplicarOperadores} (\cod{applyOperators})}

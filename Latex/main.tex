@@ -17,12 +17,17 @@
 implementación de los dos métodos comparados en la tesis para el problema de ruteo de vehículos
 con ventanas de tiempo (VRPTW): un ALNS con selección adaptativa por ruleta (\cod{ALNS\_Classic})
 y un ALNS cuya selección de operadores se aprende con Q-learning (\cod{ALNS\_QLearning}).
-Se detallan el bucle de búsqueda común en dos fases (minimización de rutas y minimización de
-distancia), los dos mecanismos de selección y aprendizaje, los seis operadores de
-destrucción, los cinco de reparación y las optimizaciones algorítmicas que
+Ambos comparten el mismo bucle de búsqueda en dos fases (minimización de rutas y minimización
+de distancia) y el mismo ritmo de aprendizaje (eligen en cada iteración y actualizan sus
+preferencias cada 100 iteraciones); solo difieren en cómo eligen los operadores y en qué
+premian. Se detallan el bucle común, los dos mecanismos de selección y aprendizaje, los seis
+operadores de destrucción, los cinco de reparación y las optimizaciones algorítmicas que
 determinan el costo por iteración. Todos los valores numéricos corresponden a las constantes y
-parámetros por defecto del código fuente. El documento se cierra con los resultados
-experimentales de ambos métodos sobre las 56 instancias de Solomon de 100 clientes.
+parámetros por defecto del código fuente. El documento se cierra con los resultados de ambos
+métodos en instancias de 100 (Solomon) y de 200, 400, 600 y 800 clientes (Gehring y
+Homberger): empatan en 100 clientes y, desde 200, el Q-learning obtiene con la misma flota
+rutas más cortas, con una ventaja que crece con el tamaño (de 0.34\,\% a 1.50\,\% de distancia
+media) y se concentra en las clases de rutas cortas.
 \end{abstract}
 
 \tableofcontents

@@ -1,426 +1,399 @@
-\section{Resultados experimentales: Solomon (100 clientes)}
+\section{Resultados experimentales}
 \label{sec:experimentos}
 
-Esta sección presenta los resultados de los dos métodos sobre las instancias de
-Solomon~\cite{solomon1987}. Todos los valores proceden de una única campaña ejecutada con la
-versión del código descrita en este documento (recalentamiento solo en la fase~1,
-Sección~\ref{sec:base}). Los datos crudos están en el archivo \cod{master\_solomon.csv} de
-\cod{Experiments/results/solomon/} y los agregados en \cod{Experiments/summary/solomon/}.
+Esta sección compara los dos métodos en cinco tamaños de instancia: las $56$ instancias de
+Solomon~\cite{solomon1987} de $100$ clientes y las de Gehring y Homberger~\cite{gehring1999}
+de $200$, $400$, $600$ y $800$ clientes. Todos los resultados proceden de la versión del
+código descrita en este documento. Los datos crudos están en
+\cod{Experiments/results/master\_solomon\_100.csv} y \cod{master\_gh<N>.csv}, y los promedios
+por instancia en \cod{Experiments/summary/}.
 
 \subsection{Diseño experimental}
 \label{sec:exp-diseno}
 
 \begin{itemize}
-\item \textbf{Instancias.} Las $56$ instancias de $100$ clientes, agrupadas en seis clases:
-C1 ($9$), C2 ($8$), R1 ($12$), R2 ($11$), RC1 ($8$) y RC2 ($8$). La letra indica la
-distribución geográfica (agrupada, aleatoria o mixta) y el dígito el horizonte: en las clases
-de tipo~1 las ventanas son estrechas y las rutas cortas (del orden de $10$ a $19$ vehículos);
-en las de tipo~2 el horizonte es largo y bastan entre $2$ y $4$ vehículos.
-\item \textbf{Presupuesto.} $T_{\max}=25\,000$ iteraciones, es decir, entre $25\,000$ y
-$50\,000$ iteraciones por corrida según lo que consuma la fase~1. Los parámetros del
-Q-learning son los valores por defecto de \cod{SolverParams}.
-\item \textbf{Repeticiones.} $10$ corridas por instancia y algoritmo: $56\times 2\times 10=1120$
-corridas. Las $1120$ terminaron con una solución válida (todas las rutas factibles y ningún
-cliente sin asignar).
-\item \textbf{Semillas pareadas.} La semilla de la corrida $k$ de una instancia es
-$(12345+\mathrm{crc32}(\textit{nombre})+7919\,k)\bmod(2^{31}-1)$ y es la misma para los dos
-algoritmos, de modo que ambos parten de la misma solución inicial y la comparación es pareada.
-\item \textbf{Referencia.} Las mejores soluciones conocidas (BKS) son las publicadas por
-SINTEF para el objetivo jerárquico (primero vehículos, después distancia), recogidas en el
-archivo \cod{sintef\_solomon.csv} de \cod{Experiments/sintef/}.
-\item \textbf{Ejecución.} Las corridas se lanzaron en paralelo, con $16$ procesos simultáneos
-en un mismo equipo. El tiempo de CPU que se reporta está afectado por esa concurrencia y debe
-leerse como orientativo y útil solo para comparar los dos métodos entre sí.
+\item \textbf{Instancias.} Seis clases en cada tamaño: C1, C2, R1, R2, RC1 y RC2. La letra
+indica la distribución geográfica de los clientes (agrupada, aleatoria o mixta) y el dígito el
+horizonte de planificación: en las clases de tipo~1 las ventanas son estrechas y las rutas
+cortas, con muchos vehículos; en las de tipo~2 el horizonte es largo y bastan pocas rutas
+largas. Solomon tiene $9$, $8$, $12$, $11$, $8$ y $8$ instancias por clase; Gehring y
+Homberger, $10$ por clase y tamaño ($60$ por tamaño).
+\item \textbf{Presupuesto.} $T_{\max}=25\,000$ iteraciones en todos los tamaños: entre
+$25\,000$ y $50\,000$ iteraciones por corrida, según lo que consuma la fase~1. Los parámetros
+del Q-learning son los de la Tabla~\ref{tab:params-ql}.
+\item \textbf{Repeticiones y semillas pareadas.} $10$ corridas por instancia y algoritmo; la
+corrida $k$ usa la semilla $k$ en los dos algoritmos, de modo que la comparación es pareada.
+En total, $1120$ corridas en Solomon y $1200$ en cada tamaño de Gehring y Homberger. Las
+$5920$ corridas terminaron con una solución válida (rutas factibles y ningún cliente sin
+asignar), según el verificador independiente de \cod{Utils/utils.cpp}.
+\item \textbf{Referencia.} Mejores soluciones conocidas (BKS) publicadas por SINTEF para el
+objetivo jerárquico, en \cod{Experiments/sintef/}.
+\item \textbf{Ejecución.} Las campañas de Gehring y Homberger se ejecutaron en un clúster
+(SLURM) con $32$ procesos simultáneos por nodo. El tiempo de CPU está afectado por esa
+concurrencia y solo es orientativo para comparar los dos métodos entre sí.
 \end{itemize}
 
 \subsection{Métricas}
 \label{sec:exp-metricas}
 
-Para cada instancia y algoritmo se promedian las $10$ corridas, lo que da un número medio de
-vehículos $\mathrm{NV}$ y una distancia media $\mathrm{TD}$. A partir de ellos se usan:
+Para cada instancia y algoritmo se promedian las $10$ corridas: número medio de vehículos
+$\mathrm{NV}$ y distancia media $\mathrm{TD}$. Las medias por clase o globales son medias de
+esas medias por instancia.
 
 \begin{itemize}
-\item \textbf{Brecha por clase.} Con $\overline{\mathrm{NV}}$ y $\overline{\mathrm{TD}}$ las
-medias de la clase,
+\item \textbf{Flota.} Se cuentan las instancias en las que cada método obtiene menos
+vehículos medios que el otro y se contrasta la diferencia con la prueba de rangos con signo
+de Wilcoxon sobre las instancias.
+\item \textbf{Mejora de distancia (IMP).} Solo es comparable con la misma flota: con un
+vehículo de más la distancia suele bajar sin que la solución sea mejor. Por eso se calcula en
+las instancias en las que ambos métodos tienen la misma flota media:
 \[
-\mathrm{GAP}_{\mathrm{NV}}=100\,\frac{\overline{\mathrm{NV}}-\overline{\mathrm{NV}}_{\mathrm{BKS}}}{\overline{\mathrm{NV}}_{\mathrm{BKS}}},
-\qquad
-\mathrm{GAP}_{\mathrm{TD}}=100\,\frac{\overline{\mathrm{TD}}-\overline{\mathrm{TD}}_{\mathrm{BKS}}}{\overline{\mathrm{TD}}_{\mathrm{BKS}}}.
+\mathrm{IMP}_{\mathrm{TD}}=100\,\frac{\mathrm{TD}_{\mathrm{ALNS}}-\mathrm{TD}_{\mathrm{Q}}}{\mathrm{TD}_{\mathrm{ALNS}}}\ (\%),
 \]
-\item \textbf{Mejora del Q-learning sobre el ALNS clásico (IMP).}
-\[
-\mathrm{IMP}_{\mathrm{NV}}=100\,\frac{\overline{\mathrm{NV}}_{\mathrm{ALNS}}-\overline{\mathrm{NV}}_{\mathrm{Q}}}{\overline{\mathrm{NV}}_{\mathrm{ALNS}}},
-\qquad
-\mathrm{IMP}_{\mathrm{TD}}=100\,\frac{\overline{\mathrm{TD}}_{\mathrm{ALNS}}-\overline{\mathrm{TD}}_{\mathrm{Q}}}{\overline{\mathrm{TD}}_{\mathrm{ALNS}}}.
-\]
-Un valor positivo favorece al Q-learning.
-\item \textbf{Brecha de distancia auditada.} Como el objetivo es jerárquico, una distancia
-solo es comparable con la del BKS si se obtuvo con su misma flota: con un vehículo de más la
-distancia suele ser \emph{menor} que la del BKS, y la brecha sale negativa sin que la solución
-sea mejor. Por eso la brecha de distancia por instancia se calcula únicamente en las
-instancias en las que la flota media de las $10$ corridas iguala la del BKS; en el resto se
-reporta solo el exceso de flota.
-\item \textbf{Marcador directo.} Cada instancia se asigna al método con menor flota media y, a
-igualdad de flota, al de menor distancia media (orden lexicográfico).
-\item \textbf{Contraste estadístico.} Prueba de rangos con signo de Wilcoxon sobre las $56$
-instancias, pareada por instancia, con nivel de significación $0.05$.
+positiva si el Q-learning recorre menos. Se reporta su media, cuántas instancias gana cada
+método y la prueba de Wilcoxon.
+\item \textbf{Brecha auditada respecto del BKS (GAP).} Por la misma razón, la brecha de
+distancia $100\,(\mathrm{TD}-\mathrm{TD}_{\mathrm{BKS}})/\mathrm{TD}_{\mathrm{BKS}}$ solo se
+calcula si la flota media no supera la del BKS; para comparar los métodos se promedia sobre
+las instancias en las que ambos cumplen esa condición.
+\item \textbf{Marcador lexicográfico.} Cada instancia se asigna al método con menor flota
+media y, a igualdad de flota, al de menor distancia media; si ambas coinciden es un empate. Se
+reporta como ganadas--empatadas--perdidas desde el punto de vista del Q-learning, con una
+prueba de signos (binomial) sobre las instancias no empatadas.
+\item \textbf{Nivel de significación.} $0.05$. Con $10$ instancias por clase, el menor
+$p$ posible en la prueba de Wilcoxon es $0.002$, de modo que las pruebas por clase solo
+detectan efectos muy consistentes.
 \end{itemize}
 
-\subsection{Resultados por clase}
+\subsection{Resumen por tamaño}
+\label{sec:exp-resumen}
 
-La Tabla~\ref{tab:sol-clases} resume los resultados. La fila global es la media de las seis
-clases.
-
-\begin{table}[H]
-\centering
-\small
-\caption{Solomon, 100 clientes: medias por clase de las $10$ corridas (NV / TD), brecha
-respecto del BKS e IMP del Q-learning sobre el ALNS clásico. Brechas e IMP en porcentaje.}
-\label{tab:sol-clases}
-\footnotesize
-\setlength{\tabcolsep}{4.5pt}
-\begin{tabular}{@{}l c c c c c c@{}}
-\toprule
- & BKS & ALNS clásico & ALNS-Q & GAP ALNS & GAP ALNS-Q & IMP \\
-Clase & NV / TD & NV / TD & NV / TD & NV / TD & NV / TD & NV / TD \\
-\midrule
-C1  & 10.00 / 828.38  & 10.00 / 828.38  & 10.00 / 828.38  & 0.00 / 0.00 & 0.00 / 0.00 & 0.00 / 0.00 \\
-C2  & 3.00 / 589.86   & 3.00 / 589.86   & 3.00 / 589.86   & 0.00 / 0.00 & 0.00 / 0.00 & 0.00 / 0.00 \\
-R1  & 11.92 / 1210.34 & 12.09 / 1217.11 & 12.09 / 1215.66 & 1.47 / 0.56 & 1.47 / 0.44 & 0.00 / $+0.12$ \\
-R2  & 2.73 / 951.03   & 2.78 / 959.59   & 2.75 / 967.91   & 2.00 / 0.90 & 0.67 / 1.77 & $+1.31$ / $-0.87$ \\
-RC1 & 11.50 / 1384.16 & 11.62 / 1388.24 & 11.65 / 1385.03 & 1.09 / 0.29 & 1.30 / 0.06 & $-0.22$ / $+0.23$ \\
-RC2 & 3.25 / 1119.24  & 3.25 / 1144.28  & 3.25 / 1140.94  & 0.00 / 2.24 & 0.00 / 1.94 & 0.00 / $+0.29$ \\
-\midrule
-Global & 7.07 / 1013.83 & 7.12 / 1021.24 & 7.12 / 1021.30 & 0.84 / 0.73 & 0.81 / 0.74 & $+0.03$ / $-0.01$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Tres observaciones:
-
-\begin{itemize}
-\item \textbf{Clases agrupadas.} En C1 y C2 los dos métodos alcanzan el BKS, en flota y en
-distancia, en las $170$ corridas de cada uno. Estas $17$ instancias no discriminan entre los
-métodos.
-\item \textbf{Nivel de calidad.} En las cuatro clases restantes ambos métodos quedan, en
-promedio, a menos del $2$\,\% del BKS en flota y a menos del $2.3$\,\% en distancia. En el
-promedio global la brecha es de $0.8$\,\% en vehículos y de $0.7$\,\% en distancia para los
-dos.
-\item \textbf{Diferencia entre métodos.} El IMP global es prácticamente nulo ($+0.03$\,\% en
-vehículos y $-0.01$\,\% en distancia). Por clase, el Q-learning usa menos vehículos en R2 y
-algo más en RC1, y obtiene menos distancia en R1, RC1 y RC2. El único IMP de distancia
-negativo, el de R2, coincide con la clase en la que el Q-learning usa menos vehículos y se
-explica por ello: en las nueve instancias de R2 en que ambos métodos emplean la misma flota
-media, el IMP de distancia es $+0.05$\,\%.
-\end{itemize}
-
-\subsection{Minimización de flota}
-
-La Tabla~\ref{tab:sol-flota} mide con qué frecuencia se alcanza la flota del BKS, que es el
-objetivo prioritario.
+Las Tablas~\ref{tab:res-global} y~\ref{tab:res-global-b} resumen los cinco tamaños y la
+Figura~\ref{fig:escala} muestra cómo evoluciona la diferencia.
 
 \begin{table}[H]
 \centering
-\small
-\caption{Solomon, 100 clientes: instancias cuya flota media iguala la del BKS y corridas
-individuales que la igualan.}
-\label{tab:sol-flota}
-\begin{tabular}{@{}l c c c c c@{}}
+\caption{Resumen global por tamaño: flota, distancia con la misma flota y marcador. NV:
+vehículos medios por instancia. «Q / A»: instancias en las que gana el Q-learning / el ALNS
+clásico. IMP en porcentaje (positivo favorece al Q-learning).}
+\label{tab:res-global}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}r ccc cc c c c c c c@{}}
 \toprule
- & & \multicolumn{2}{c}{Instancias con flota media = BKS} & \multicolumn{2}{c}{Corridas con flota = BKS} \\
-\cmidrule(lr){3-4}\cmidrule(l){5-6}
-Clase & Instancias & ALNS clásico & ALNS-Q & ALNS clásico & ALNS-Q \\
+ & \multicolumn{5}{c}{Flota} & \multicolumn{4}{c}{Distancia, instancias con la misma flota} & \multicolumn{2}{c}{Marcador} \\
+\cmidrule(lr){2-6}\cmidrule(lr){7-10}\cmidrule(l){11-12}
+$n$ & BKS & ALNS & ALNS-Q & Menos NV (Q / A) & $p$ & Inst. & IMP & Gana (Q / A) & $p$ & G--E--P & $p$ \\
 \midrule
-C1  & 9  & 9  & 9  & 90 / 90   & 90 / 90 \\
-C2  & 8  & 8  & 8  & 80 / 80   & 80 / 80 \\
-R1  & 12 & 7  & 8  & 99 / 120  & 99 / 120 \\
-R2  & 11 & 8  & 9  & 104 / 110 & 108 / 110 \\
-RC1 & 8  & 5  & 5  & 70 / 80   & 68 / 80 \\
-RC2 & 8  & 8  & 8  & 80 / 80   & 80 / 80 \\
-\midrule
-Total & 56 & 45 & 47 & 523 / 560 & 525 / 560 \\
+100 & 7.23 & 7.30 & 7.30 & 4 / 5 & 0.763 & 47 & 0.00 & 10 / 20 & 0.213 & 14--17--25 & 0.108 \\
+200 & 11.57 & 11.59 & 11.58 & 3 / 0 & 0.102 & 57 & $+0.34$ & 40 / 11 & $<0.001$ & 43--6--11 & $<0.001$ \\
+400 & 23.00 & 23.20 & 23.18 & 7 / 2 & 0.109 & 51 & $+1.11$ & 43 / 6 & $<0.001$ & 50--2--8 & $<0.001$ \\
+600 & 34.42 & 34.74 & 34.70 & 10 / 3 & 0.041 & 47 & $+1.30$ & 41 / 5 & $<0.001$ & 51--1--8 & $<0.001$ \\
+800 & 45.53 & 46.21 & 46.18 & 9 / 6 & 0.132 & 45 & $+1.50$ & 41 / 3 & $<0.001$ & 50--1--9 & $<0.001$ \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \end{table}
-
-El ALNS clásico iguala la flota del BKS en el $93.4$\,\% de las corridas y el Q-learning en
-el $93.8$\,\%. Considerando la mejor de las $10$ corridas, \emph{los dos métodos alcanzan la
-flota del BKS en las $56$ instancias}; ninguno la mejora. Las corridas con un vehículo de más
-se concentran en $11$ instancias de R1, R2 y RC1 (Tabla~\ref{tab:sol-exceso}), que son las
-mismas para ambos métodos salvo R111 y R202, en las que el Q-learning iguala al BKS en las
-diez corridas. La diferencia de flota entre métodos
-no es estadísticamente significativa (Wilcoxon, $p=0.75$). Por corrida, con la misma semilla,
-el Q-learning usa menos vehículos en $15$ de los $560$ pares, el clásico en $13$ y coinciden
-en $532$.
 
 \begin{table}[H]
 \centering
-\small
-\caption{Instancias en las que algún método no iguala la flota del BKS en las $10$ corridas:
-flota media de cada método.}
-\label{tab:sol-exceso}
-\begin{tabular}{@{}l c c c @{\hspace{2.5em}} l c c c@{}}
+\caption{Resumen global por tamaño: brecha auditada respecto del BKS (en porcentaje, sobre
+las instancias en que ambos igualan la flota del BKS), comparación por corrida con la misma
+semilla y tiempo medio de CPU por corrida.}
+\label{tab:res-global-b}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}r cccc c cc cc@{}}
 \toprule
-Instancia & BKS & ALNS & ALNS-Q & Instancia & BKS & ALNS & ALNS-Q \\
+ & \multicolumn{4}{c}{GAP auditado} & Corridas con & \multicolumn{2}{c}{Corridas pareadas (Q / A)} & \multicolumn{2}{c}{CPU (s)} \\
+\cmidrule(lr){2-5}\cmidrule(lr){7-8}\cmidrule(l){9-10}
+$n$ & Inst. & ALNS & ALNS-Q & $p$ & flota BKS (A / Q) & Menos vehículos & Menos distancia$^{\dagger}$ & ALNS & ALNS-Q \\
 \midrule
-R104 & 9  & 9.9  & 9.8  & R207  & 2  & 2.1  & 2.1 \\
-R109 & 11 & 11.2 & 11.2 & R211  & 2  & 2.4  & 2.1 \\
-R110 & 10 & 10.2 & 10.2 & RC102 & 12 & 12.2 & 12.2 \\
-R111 & 10 & 10.1 & 10.0 & RC105 & 13 & 13.1 & 13.3 \\
-R112 & 9  & 9.7  & 9.9  & RC106 & 11 & 11.7 & 11.7 \\
-R202 & 3  & 3.1  & 3.0  &       &    &      &     \\
+100 & 47 & 0.66 & 0.66 & 0.289 & 522 / 521 de 560 & 13 / 14 & 151 / 154 & 5.5 & 5.6 \\
+200 & 57 & 1.99 & 1.63 & $<0.001$ & 584 / 590 de 600 & 9 / 3 & 298 / 198 & 18.0 & 16.5 \\
+400 & 44 & 5.21 & 4.05 & $<0.001$ & 490 / 499 de 600 & 31 / 17 & 378 / 144 & 30.2 & 28.2 \\
+600 & 40 & 8.91 & 7.42 & $<0.001$ & 449 / 459 de 600 & 37 / 15 & 382 / 148 & 34.9 & 37.3 \\
+800 & 30 & 7.31 & 5.92 & $<0.001$ & 321 / 325 de 600 & 39 / 25 & 424 / 102 & 49.9 & 54.0 \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
+
+\vspace{2pt}
+\raggedright\footnotesize
+$^{\dagger}$ Solo entre los pares de corridas (misma instancia y semilla) que obtienen el mismo número de vehículos; el resto son empates exactos.
 \end{table}
-
-Las instancias más difíciles en flota son R104, R112 y RC106, en las que el vehículo
-adicional aparece en la mayoría de las corridas de los dos métodos: en ellas la fase~1
-(Sección~\ref{sec:fases}) rara vez consigue vaciar el banco de la última ruta eliminada.
-
-\subsection{Calidad de ruta}
-
-La Tabla~\ref{tab:sol-gap} recoge la brecha de distancia auditada. Para comparar los métodos
-sobre el mismo conjunto, se añade la brecha restringida a las $45$ instancias en las que
-\emph{ambos} igualan la flota del BKS, y la brecha de la mejor de las $10$ corridas, que está
-definida en las $56$ instancias porque la mejor corrida siempre iguala la flota del BKS.
-
-\begin{table}[H]
-\centering
-\small
-\caption{Solomon, 100 clientes: brecha de distancia respecto del BKS, en porcentaje. Entre
-paréntesis, número de instancias sobre el que se promedia.}
-\label{tab:sol-gap}
-\begin{tabular}{@{}l c c c c c c c@{}}
-\toprule
- & \multicolumn{2}{c}{Media, auditada} & \multicolumn{3}{c}{Media, instancias comunes} & \multicolumn{2}{c}{Mejor de $10$} \\
-\cmidrule(lr){2-3}\cmidrule(lr){4-6}\cmidrule(l){7-8}
-Clase & ALNS & ALNS-Q & $n$ & ALNS & ALNS-Q & ALNS & ALNS-Q \\
-\midrule
-C1  & 0.00 (9) & 0.00 (9) & 9 & 0.00 & 0.00 & 0.00 & 0.00 \\
-C2  & 0.00 (8) & 0.00 (8) & 8 & 0.00 & 0.00 & 0.00 & 0.00 \\
-R1  & 0.56 (7) & 0.50 (8) & 7 & 0.56 & 0.40 & 0.47 & 0.42 \\
-R2  & 1.23 (8) & 1.50 (9) & 8 & 1.23 & 1.29 & 0.35 & 0.46 \\
-RC1 & 1.02 (5) & 0.88 (5) & 5 & 1.02 & 0.88 & 0.09 & 0.17 \\
-RC2 & 2.07 (8) & 1.76 (8) & 8 & 2.07 & 1.76 & 0.49 & 0.15 \\
-\midrule
-Total & 0.79 (45) & 0.77 (47) & 45 & 0.79 & 0.70 & 0.25 & 0.23 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-En las $45$ instancias comunes la brecha media del Q-learning es $0.70$\,\% frente a
-$0.79$\,\% del ALNS clásico; es menor en R1, RC1 y RC2 y mayor en R2. La diferencia no es
-estadísticamente significativa (Wilcoxon, $n=45$, $p=0.23$). La mejor de las $10$ corridas
-queda a $0.25$\,\% y $0.23$\,\% del BKS, respectivamente, con la flota del BKS en todas las
-instancias. La distancia entre la brecha media y la de la mejor corrida, que es mayor en las
-clases de horizonte largo (R2 y RC2), indica que en ellas el resultado depende más de la
-semilla.
-
-La comparación directa entre métodos, sin pasar por el BKS, usa las $50$ instancias en las
-que ambos obtienen la misma flota media. En ellas el IMP medio de distancia es $+0.10$\,\%
-($+0.15$\,\% en R1, $+0.05$\,\% en R2, $+0.10$\,\% en RC1 y $+0.30$\,\% en RC2): el Q-learning
-obtiene menos distancia en $19$ instancias, el clásico en $14$ y empatan en $17$. Tampoco esta
-diferencia es significativa (Wilcoxon, $p=0.24$). Por corrida, en los $532$ pares con la
-misma flota el Q-learning obtiene menos distancia en $167$, el clásico en $152$ y coinciden
-en $213$.
-
-\subsection{Marcador directo y tiempo de cómputo}
-
-\begin{table}[H]
-\centering
-\small
-\caption{Solomon, 100 clientes: marcador lexicográfico del Q-learning frente al ALNS clásico
-(instancias ganadas, empatadas y perdidas) y tiempo medio de CPU por corrida, en segundos.}
-\label{tab:sol-marcador}
-\begin{tabular}{@{}l c c c c c@{}}
-\toprule
- & \multicolumn{3}{c}{ALNS-Q frente a ALNS} & \multicolumn{2}{c}{Tiempo de CPU (s)} \\
-\cmidrule(lr){2-4}\cmidrule(l){5-6}
-Clase & Gana & Empata & Pierde & ALNS clásico & ALNS-Q \\
-\midrule
-C1  & 0 & 9 & 0 & 2.44 & 2.52 \\
-C2  & 0 & 8 & 0 & 3.89 & 4.03 \\
-R1  & 7 & 0 & 5 & 5.08 & 4.55 \\
-R2  & 6 & 0 & 5 & 6.64 & 6.75 \\
-RC1 & 4 & 0 & 4 & 4.32 & 4.81 \\
-RC2 & 6 & 0 & 2 & 6.53 & 5.96 \\
-\midrule
-Total & 23 & 17 & 16 & 4.89 & 4.82 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-El Q-learning gana $23$ instancias, pierde $16$ y empata $17$ (las de C1 y C2). Fuera de las
-clases agrupadas el marcador es $23$ a $16$, con la ventaja más clara en RC2. El costo
-computacional es equivalente: $4.89$~s y $4.82$~s por corrida en promedio, sin diferencia
-significativa (Wilcoxon, $p=0.96$). Esto es coherente con el diseño: los dos métodos ejecutan
-los mismos operadores y solo difieren en la selección y el aprendizaje, cuyo costo es
-despreciable frente al de la reparación (Sección~\ref{sec:reparacion}). Las clases de
-horizonte largo (R2 y RC2), con rutas más largas, son las más costosas para ambos.
-
-\subsection{Distribución por corrida}
-
-Las Figuras~\ref{fig:sol-box-veh} y~\ref{fig:sol-box-dist} muestran la distribución de la
-brecha de cada corrida individual, sin auditar. En vehículos, las cajas están colapsadas en
-cero y los puntos aislados corresponden a las corridas con un vehículo de más; como las clases
-de tipo~2 usan dos o tres vehículos, un solo vehículo adicional supone allí una brecha del
-$33$\,\% o del $50$\,\%. En distancia, los valores negativos son precisamente esas corridas:
-usan más vehículos que el BKS y por eso recorren menos. La
-Figura~\ref{fig:sol-scatter} compara, instancia a instancia, la brecha media de distancia de
-los dos métodos: los puntos se disponen a ambos lados de la diagonal sin un sesgo apreciable.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.78\textwidth]{../Experiments/figs/solomon/boxplot_gap_vehiculos.png}
-\caption{Brecha de vehículos por corrida respecto del BKS, por clase.}
-\label{fig:sol-box-veh}
+\includegraphics[width=\textwidth]{../Experiments/figs/escala/imp_por_tamano.png}
+\caption{(a) IMP medio de distancia del Q-learning sobre el ALNS clásico, en las instancias
+con la misma flota media, por clase y global. (b) Marcador lexicográfico por instancia.}
+\label{fig:escala}
 \end{figure}
 
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.78\textwidth]{../Experiments/figs/solomon/boxplot_gap_distancia.png}
-\caption{Brecha de distancia por corrida respecto del BKS, por clase (sin auditar: los
-valores negativos son corridas con más vehículos que el BKS).}
-\label{fig:sol-box-dist}
-\end{figure}
+\subsection{Resultados por tamaño}
+\label{sec:exp-tamanos}
 
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.6\textwidth]{../Experiments/figs/solomon/scatter_gap_distancia.png}
-\caption{Brecha media de distancia por instancia: ALNS clásico (abscisas) frente a
-Q-learning (ordenadas). Por debajo de la diagonal el Q-learning es mejor.}
-\label{fig:sol-scatter}
-\end{figure}
+Las tablas de este apartado usan las mismas columnas: NV / TD medios de cada clase (BKS, ALNS
+clásico y ALNS-Q); número de instancias con menos flota media para cada método; IMP medio de
+distancia y, entre paréntesis, número de instancias con la misma flota sobre el que se
+calcula; GAP auditado medio de cada método y número de instancias en que ambos igualan la
+flota del BKS; y marcador del Q-learning (ganadas--empatadas--perdidas).
 
-\subsection{Discusión}
-\label{sec:exp-discusion}
-
-\begin{itemize}
-\item \textbf{Ambos métodos son competitivos en este tamaño.} Con $25\,000$ iteraciones de
-fase~2 y unos $5$ segundos por corrida, los dos alcanzan la flota del BKS en todas las
-instancias en al menos una de las diez corridas, y en el $93$\,\% de las corridas
-individuales; la mejor corrida queda a un cuarto de punto porcentual del BKS en distancia.
-Este nivel se debe a los componentes comunes (Sección~\ref{sec:sintesis}): la fase propia de
-reducción de flota, el catálogo de operadores y el esquema de temperatura.
-\item \textbf{No hay diferencia significativa entre los mecanismos de selección.} El
-Q-learning queda ligeramente por delante en casi todos los indicadores agregados (marcador
-$23$ a $16$, brecha en instancias comunes $0.70$\,\% frente a $0.79$\,\%, dos instancias más
-con la flota del BKS), pero ninguna de las pruebas alcanza significación y la magnitud de las
-diferencias, del orden de una décima de punto porcentual, es inferior a la variación entre
-semillas. Con estos datos no puede afirmarse que un método supere al otro en instancias de
-$100$ clientes.
-\item \textbf{Dónde aparece la diferencia.} Las diferencias, cuando las hay, se concentran en
-las clases con clientes dispersos y son nulas en las agrupadas. En R2 el Q-learning reduce
-flota (iguala al BKS en $108$ de $110$ corridas, frente a $104$) a costa de distancia; en RC2,
-con flota idéntica, reduce la brecha de $2.07$\,\% a $1.76$\,\%; en RC1 el clásico iguala la
-flota del BKS en dos corridas más.
-\item \textbf{Efecto techo.} Diecisiete de las $56$ instancias las resuelven ambos métodos en
-todas las corridas, y en la mayoría de las restantes el margen respecto del BKS es inferior
-al $2$\,\%. Con tan poco margen de mejora, este conjunto discrimina mal entre mecanismos de
-selección: el presupuesto de iteraciones basta para que una selección menos informada llegue
-a soluciones de calidad similar. Las diferencias de mecanismo descritas en la
-Sección~\ref{sec:sintesis} deberían manifestarse con más claridad cuando el presupuesto es
-escaso en relación con el tamaño de la instancia, lo que corresponde a las instancias de
-Gehring y Homberger~\cite{gehring1999}, cuyos resultados no se incluyen en esta sección.
-\end{itemize}
-
-\subsection{Resultados por instancia}
-
-Las Tablas~\ref{tab:sol-instancias} y~\ref{tab:sol-instancias-b} detallan las $56$ instancias. Las columnas NV y TD son medias
-de las $10$ corridas; GAP es la brecha de distancia auditada, en porcentaje, y se omite (--)
-cuando la flota media supera la del BKS; la mejor corrida es la mejor de las $10$ en orden
-lexicográfico, expresada como vehículos/distancia.
+% ----------------------------------------------------------------------
+\subsubsection{100 clientes (Solomon)}
+\label{sec:exp-100}
 
 \begin{table}[H]
 \centering
-\footnotesize
-\setlength{\tabcolsep}{4pt}
-\caption{Solomon, 100 clientes: resultados por instancia, clases C1, C2 y R1.}
-\label{tab:sol-instancias}
-\begin{tabular}{@{}l r r r r r r r r r r@{}}
+\caption{Solomon, $100$ clientes: resultados por clase.}
+\label{tab:res-100}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}l ccc c c c c@{}}
 \toprule
- & \multicolumn{2}{c}{BKS} & \multicolumn{3}{c}{ALNS clásico (media)} & \multicolumn{3}{c}{ALNS-Q (media)} & \multicolumn{2}{c}{Mejor corrida} \\
-\cmidrule(lr){2-3}\cmidrule(lr){4-6}\cmidrule(lr){7-9}\cmidrule(l){10-11}
-Inst. & NV & TD & NV & TD & GAP & NV & TD & GAP & ALNS & ALNS-Q \\
+Clase & BKS NV / TD & ALNS NV / TD & ALNS-Q NV / TD & Menos NV (Q / A) & IMP TD (inst.) & GAP A / Q (inst.) & G--E--P \\
 \midrule
-% Filas generadas desde Experiments/results/solomon/master_solomon.csv
-C101 & 10 & 828.94 & 10.0 & 828.94 & 0.00 & 10.0 & 828.94 & 0.00 & 10/828.94 & 10/828.94 \\
-C102 & 10 & 828.94 & 10.0 & 828.94 & 0.00 & 10.0 & 828.94 & 0.00 & 10/828.94 & 10/828.94 \\
-C103 & 10 & 828.06 & 10.0 & 828.07 & 0.00 & 10.0 & 828.07 & 0.00 & 10/828.07 & 10/828.07 \\
-C104 & 10 & 824.78 & 10.0 & 824.78 & 0.00 & 10.0 & 824.78 & 0.00 & 10/824.78 & 10/824.78 \\
-C105 & 10 & 828.94 & 10.0 & 828.94 & 0.00 & 10.0 & 828.94 & 0.00 & 10/828.94 & 10/828.94 \\
-C106 & 10 & 828.94 & 10.0 & 828.94 & 0.00 & 10.0 & 828.94 & 0.00 & 10/828.94 & 10/828.94 \\
-C107 & 10 & 828.94 & 10.0 & 828.94 & 0.00 & 10.0 & 828.94 & 0.00 & 10/828.94 & 10/828.94 \\
-C108 & 10 & 828.94 & 10.0 & 828.94 & 0.00 & 10.0 & 828.94 & 0.00 & 10/828.94 & 10/828.94 \\
-C109 & 10 & 828.94 & 10.0 & 828.94 & 0.00 & 10.0 & 828.94 & 0.00 & 10/828.94 & 10/828.94 \\
-\addlinespace
-C201 & 3 & 591.56 & 3.0 & 591.56 & 0.00 & 3.0 & 591.56 & 0.00 & 3/591.56 & 3/591.56 \\
-C202 & 3 & 591.56 & 3.0 & 591.56 & 0.00 & 3.0 & 591.56 & 0.00 & 3/591.56 & 3/591.56 \\
-C203 & 3 & 591.17 & 3.0 & 591.17 & 0.00 & 3.0 & 591.17 & 0.00 & 3/591.17 & 3/591.17 \\
-C204 & 3 & 590.60 & 3.0 & 590.60 & 0.00 & 3.0 & 590.60 & 0.00 & 3/590.60 & 3/590.60 \\
-C205 & 3 & 588.88 & 3.0 & 588.88 & 0.00 & 3.0 & 588.88 & 0.00 & 3/588.88 & 3/588.88 \\
-C206 & 3 & 588.49 & 3.0 & 588.49 & 0.00 & 3.0 & 588.49 & 0.00 & 3/588.49 & 3/588.49 \\
-C207 & 3 & 588.29 & 3.0 & 588.29 & 0.00 & 3.0 & 588.29 & 0.00 & 3/588.29 & 3/588.29 \\
-C208 & 3 & 588.32 & 3.0 & 588.32 & 0.00 & 3.0 & 588.32 & 0.00 & 3/588.32 & 3/588.32 \\
-\addlinespace
-R101 & 19 & 1650.80 & 19.0 & 1650.85 & 0.00 & 19.0 & 1650.88 & 0.00 & 19/1650.80 & 19/1650.80 \\
-R102 & 17 & 1486.12 & 17.0 & 1486.59 & 0.03 & 17.0 & 1486.95 & 0.06 & 17/1486.12 & 17/1486.12 \\
-R103 & 13 & 1292.68 & 13.0 & 1295.62 & 0.23 & 13.0 & 1295.56 & 0.22 & 13/1292.68 & 13/1292.68 \\
-R104 & 9 & 1007.31 & 9.9 & 988.14 & -- & 9.8 & 990.54 & -- & 9/1007.31 & 9/1007.31 \\
-R105 & 14 & 1377.11 & 14.0 & 1381.53 & 0.32 & 14.0 & 1380.66 & 0.26 & 14/1377.11 & 14/1377.11 \\
-R106 & 12 & 1252.03 & 12.0 & 1258.00 & 0.48 & 12.0 & 1258.45 & 0.51 & 12/1252.03 & 12/1252.03 \\
-R107 & 10 & 1104.66 & 10.0 & 1118.58 & 1.26 & 10.0 & 1116.51 & 1.07 & 10/1111.44 & 10/1104.66 \\
-R108 & 9 & 960.88 & 9.0 & 976.33 & 1.61 & 9.0 & 967.45 & 0.68 & 9/963.66 & 9/960.88 \\
-R109 & 11 & 1194.73 & 11.2 & 1243.62 & -- & 11.2 & 1217.93 & -- & 11/1226.49 & 11/1201.41 \\
-R110 & 10 & 1118.84 & 10.2 & 1127.15 & -- & 10.2 & 1147.20 & -- & 10/1118.84 & 10/1142.75 \\
-R111 & 10 & 1096.73 & 10.1 & 1100.49 & -- & 10.0 & 1109.79 & 1.19 & 10/1096.73 & 10/1096.73 \\
-R112 & 9 & 982.14 & 9.7 & 978.45 & -- & 9.9 & 965.98 & -- & 9/1002.26 & 9/1004.60 \\
+C1 & 10.00 / 828.4 & 10.00 / 828.4 & 10.00 / 828.4 & 0 / 0 & 0.00 (9) & 0.00 / 0.00 (9) & 0--9--0 \\
+C2 & 3.00 / 589.9 & 3.00 / 589.9 & 3.00 / 589.9 & 0 / 0 & 0.00 (8) & 0.00 / 0.00 (8) & 0--8--0 \\
+R1 & 11.92 / 1210.3 & 12.10 / 1216.8 & 12.13 / 1213.0 & 1 / 3 & $+0.12$ (8) & 0.63 / 0.51 (8) & 4--0--8 \\
+R2 & 2.73 / 951.0 & 2.78 / 964.1 & 2.77 / 964.0 & 1 / 1 & $+0.10$ (9) & 1.54 / 1.44 (9) & 5--0--6 \\
+RC1 & 11.50 / 1384.2 & 11.61 / 1387.3 & 11.61 / 1388.6 & 1 / 1 & $-0.15$ (6) & 0.65 / 0.80 (6) & 2--0--6 \\
+RC2 & 3.25 / 1119.2 & 3.26 / 1135.8 & 3.25 / 1140.4 & 1 / 0 & $-0.16$ (7) & 1.16 / 1.32 (7) & 3--0--5 \\
+\midrule
+Global & 7.23 / 1021.2 & 7.30 / 1028.0 & 7.30 / 1027.9 & 4 / 5 & 0.00 (47) & 0.66 / 0.66 (47) & 14--17--25 \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \end{table}
+
+\textbf{Empate.} Los dos métodos obtienen la misma flota media ($7.30$; $p=0.76$) y la misma
+brecha auditada ($0.66$\,\%). Con la misma flota, la distancia media es igual
+($\mathrm{IMP}=0.00$\,\%); el ALNS clásico recorre menos en $20$ instancias y el Q-learning en
+$10$, sin significación ($p=0.21$). El marcador, $14$--$17$--$25$, favorece algo al clásico,
+tampoco de forma significativa ($p=0.11$), y procede de diferencias de una décima de vehículo
+o de décimas de punto porcentual de distancia. Las $17$ instancias de C1 y C2 se resuelven
+igual, en el BKS, en todas las corridas; en el resto, ambos quedan a menos del $2$\,\% del BKS.
+Este conjunto está cerca de su techo con $25\,000$ iteraciones: cualquier mecanismo de
+selección razonable llega a soluciones equivalentes, y por eso no sirve para predecir el
+comportamiento en instancias mayores.
+
+% ----------------------------------------------------------------------
+\subsubsection{200 clientes}
+\label{sec:exp-200}
 
 \begin{table}[H]
 \centering
-\footnotesize
-\setlength{\tabcolsep}{4pt}
-\caption{Solomon, 100 clientes: resultados por instancia, clases R2, RC1 y RC2.}
-\label{tab:sol-instancias-b}
-\begin{tabular}{@{}l r r r r r r r r r r@{}}
+\caption{Gehring y Homberger, $200$ clientes: resultados por clase.}
+\label{tab:res-200}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}l ccc c c c c@{}}
 \toprule
- & \multicolumn{2}{c}{BKS} & \multicolumn{3}{c}{ALNS clásico (media)} & \multicolumn{3}{c}{ALNS-Q (media)} & \multicolumn{2}{c}{Mejor corrida} \\
-\cmidrule(lr){2-3}\cmidrule(lr){4-6}\cmidrule(lr){7-9}\cmidrule(l){10-11}
-Inst. & NV & TD & NV & TD & GAP & NV & TD & GAP & ALNS & ALNS-Q \\
+Clase & BKS NV / TD & ALNS NV / TD & ALNS-Q NV / TD & Menos NV (Q / A) & IMP TD (inst.) & GAP A / Q (inst.) & G--E--P \\
 \midrule
-% Filas generadas desde Experiments/results/solomon/master_solomon.csv
-R201 & 4 & 1252.37 & 4.0 & 1253.98 & 0.13 & 4.0 & 1257.49 & 0.41 & 4/1252.37 & 4/1253.23 \\
-R202 & 3 & 1191.70 & 3.1 & 1183.33 & -- & 3.0 & 1230.30 & 3.24 & 3/1191.70 & 3/1195.30 \\
-R203 & 3 & 939.50 & 3.0 & 944.52 & 0.53 & 3.0 & 947.38 & 0.84 & 3/939.50 & 3/941.41 \\
-R204 & 2 & 825.52 & 2.0 & 840.99 & 1.87 & 2.0 & 843.15 & 2.14 & 2/828.78 & 2/828.78 \\
-R205 & 3 & 994.43 & 3.0 & 1006.70 & 1.23 & 3.0 & 1004.94 & 1.06 & 3/994.43 & 3/994.43 \\
-R206 & 3 & 906.14 & 3.0 & 920.47 & 1.58 & 3.0 & 915.34 & 1.02 & 3/906.14 & 3/906.14 \\
-R207 & 2 & 890.61 & 2.1 & 926.53 & -- & 2.1 & 918.08 & -- & 2/897.06 & 2/907.69 \\
-R208 & 2 & 726.82 & 2.0 & 734.33 & 1.03 & 2.0 & 733.22 & 0.88 & 2/726.82 & 2/726.82 \\
-R209 & 3 & 909.16 & 3.0 & 925.92 & 1.84 & 3.0 & 930.44 & 2.34 & 3/915.24 & 3/913.77 \\
-R210 & 3 & 939.37 & 3.0 & 954.42 & 1.60 & 3.0 & 954.53 & 1.61 & 3/942.11 & 3/939.37 \\
-R211 & 2 & 885.71 & 2.4 & 864.27 & -- & 2.1 & 912.11 & -- & 2/901.52 & 2/900.35 \\
-\addlinespace
-RC101 & 14 & 1696.95 & 14.0 & 1709.01 & 0.71 & 14.0 & 1703.96 & 0.41 & 14/1697.43 & 14/1696.95 \\
-RC102 & 12 & 1554.75 & 12.2 & 1549.34 & -- & 12.2 & 1544.15 & -- & 12/1554.75 & 12/1554.75 \\
-RC103 & 11 & 1261.67 & 11.0 & 1267.85 & 0.49 & 11.0 & 1270.07 & 0.67 & 11/1262.02 & 11/1263.54 \\
-RC104 & 10 & 1135.48 & 10.0 & 1139.86 & 0.39 & 10.0 & 1139.22 & 0.33 & 10/1135.52 & 10/1135.48 \\
-RC105 & 13 & 1629.44 & 13.1 & 1624.30 & -- & 13.3 & 1609.16 & -- & 13/1629.44 & 13/1629.44 \\
-RC106 & 11 & 1424.73 & 11.7 & 1403.86 & -- & 11.7 & 1409.11 & -- & 11/1424.73 & 11/1432.12 \\
-RC107 & 11 & 1230.48 & 11.0 & 1246.42 & 1.30 & 11.0 & 1233.41 & 0.24 & 11/1231.53 & 11/1231.53 \\
-RC108 & 10 & 1139.82 & 10.0 & 1165.29 & 2.23 & 10.0 & 1171.18 & 2.75 & 10/1146.66 & 10/1146.66 \\
-\addlinespace
-RC201 & 4 & 1406.94 & 4.0 & 1422.65 & 1.12 & 4.0 & 1424.72 & 1.26 & 4/1415.00 & 4/1412.45 \\
-RC202 & 3 & 1365.65 & 3.0 & 1455.38 & 6.57 & 3.0 & 1442.93 & 5.66 & 3/1368.04 & 3/1365.65 \\
-RC203 & 3 & 1049.62 & 3.0 & 1069.28 & 1.87 & 3.0 & 1068.53 & 1.80 & 3/1061.13 & 3/1051.82 \\
-RC204 & 3 & 798.46 & 3.0 & 802.33 & 0.48 & 3.0 & 801.60 & 0.39 & 3/798.46 & 3/798.46 \\
-RC205 & 4 & 1297.65 & 4.0 & 1314.51 & 1.30 & 4.0 & 1320.32 & 1.75 & 4/1303.37 & 4/1302.42 \\
-RC206 & 3 & 1146.32 & 3.0 & 1168.31 & 1.92 & 3.0 & 1156.15 & 0.86 & 3/1152.03 & 3/1146.32 \\
-RC207 & 3 & 1061.14 & 3.0 & 1083.97 & 2.15 & 3.0 & 1082.00 & 1.97 & 3/1070.85 & 3/1061.84 \\
-RC208 & 3 & 828.14 & 3.0 & 837.82 & 1.17 & 3.0 & 831.28 & 0.38 & 3/829.70 & 3/829.70 \\
+C1 & 18.90 / 2718.4 & 18.90 / 2743.5 & 18.90 / 2737.2 & 0 / 0 & $+0.23$ (10) & 0.91 / 0.68 (10) & 5--4--1 \\
+C2 & 6.00 / 1831.6 & 6.00 / 1837.5 & 6.00 / 1837.0 & 0 / 0 & $+0.03$ (10) & 0.34 / 0.31 (10) & 6--2--2 \\
+R1 & 18.20 / 3611.9 & 18.20 / 3691.3 & 18.20 / 3672.5 & 0 / 0 & $+0.51$ (10) & 2.22 / 1.70 (10) & 9--0--1 \\
+R2 & 4.00 / 2929.4 & 4.07 / 2949.6 & 4.05 / 2958.5 & 1 / 0 & $+0.01$ (9) & 1.53 / 1.52 (9) & 6--0--4 \\
+RC1 & 18.00 / 3176.2 & 18.00 / 3325.8 & 18.00 / 3291.4 & 0 / 0 & $+1.01$ (10) & 4.62 / 3.55 (10) & 10--0--0 \\
+RC2 & 4.30 / 2535.9 & 4.39 / 2585.5 & 4.35 / 2592.0 & 2 / 0 & $+0.20$ (8) & 2.34 / 2.14 (8) & 7--0--3 \\
+\midrule
+Global & 11.57 / 2800.6 & 11.59 / 2855.5 & 11.58 / 2848.1 & 3 / 0 & $+0.34$ (57) & 1.99 / 1.63 (57) & 43--6--11 \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \end{table}
+
+\textbf{Aparece la ventaja, en distancia.} La flota es prácticamente la misma (el Q-learning
+tiene menos vehículos medios en $3$ instancias y el clásico en ninguna; $p=0.10$), pero con la
+misma flota el Q-learning recorre menos: IMP medio $+0.34$\,\% en $57$ instancias, con $40$
+ganadas y $11$ perdidas ($p<0.001$), y la brecha auditada baja de $1.99$\,\% a $1.63$\,\%
+($p<0.001$). El marcador es $43$--$6$--$11$ ($p<0.001$). La ventaja se concentra en RC1
+($10$--$0$--$0$, $+1.01$\,\%) y R1 ($9$--$0$--$1$, $+0.51$\,\%); en C1, C2 y R2 la diferencia de
+distancia es pequeña ($+0.23$, $+0.03$ y $+0.01$\,\%). Por corrida, entre los pares con la
+misma flota, el Q-learning recorre menos en $298$ y el clásico en $198$. El Q-learning fue
+además un $8$\,\% más rápido en tiempo de CPU ($16.5$ frente a $18.0$~s).
+
+% ----------------------------------------------------------------------
+\subsubsection{400 clientes}
+\label{sec:exp-400}
+
+\begin{table}[H]
+\centering
+\caption{Gehring y Homberger, $400$ clientes: resultados por clase.}
+\label{tab:res-400}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}l ccc c c c c@{}}
+\toprule
+Clase & BKS NV / TD & ALNS NV / TD & ALNS-Q NV / TD & Menos NV (Q / A) & IMP TD (inst.) & GAP A / Q (inst.) & G--E--P \\
+\midrule
+C1 & 37.60 / 7167.6 & 37.93 / 7414.1 & 37.88 / 7347.0 & 3 / 2 & $+1.18$ (5) & 2.16 / 0.92 (5) & 6--2--2 \\
+C2 & 11.60 / 3939.9 & 12.04 / 4013.4 & 12.01 / 3928.4 & 2 / 0 & $+1.70$ (8) & 4.25 / 2.10 (4) & 8--0--2 \\
+R1 & 36.40 / 8360.6 & 36.40 / 8865.3 & 36.40 / 8740.9 & 0 / 0 & $+1.41$ (10) & 6.02 / 4.51 (10) & 10--0--0 \\
+R2 & 8.00 / 6142.7 & 8.00 / 6379.3 & 8.00 / 6363.5 & 0 / 0 & $+0.19$ (10) & 3.92 / 3.72 (10) & 7--0--3 \\
+RC1 & 36.00 / 7869.4 & 36.07 / 8474.5 & 36.03 / 8343.3 & 1 / 0 & $+1.81$ (9) & 8.03 / 6.07 (9) & 10--0--0 \\
+RC2 & 8.40 / 5285.2 & 8.77 / 5406.7 & 8.75 / 5392.4 & 1 / 0 & $+0.52$ (9) & 4.96 / 4.73 (6) & 9--0--1 \\
+\midrule
+Global & 23.00 / 6460.9 & 23.20 / 6758.9 & 23.18 / 6685.9 & 7 / 2 & $+1.11$ (51) & 5.21 / 4.05 (44) & 50--2--8 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\textbf{La ventaja se triplica.} El IMP medio sube a $+1.11$\,\% ($51$ instancias con la
+misma flota; $43$ ganadas y $6$ perdidas; $p<0.001$) y la brecha auditada baja de $5.21$\,\% a
+$4.05$\,\% ($p<0.001$). El marcador es $50$--$2$--$8$. La flota sigue sin diferencia
+significativa ($23.18$ frente a $23.20$; $7$ instancias con menos flota para el Q-learning y $2$
+para el clásico; $p=0.11$), aunque el Q-learning iguala la flota del BKS en $499$ corridas
+frente a $490$. R1 y RC1 son $10$--$0$--$0$ con $+1.41$ y $+1.81$\,\%; la ventaja se extiende
+a C1 y C2 ($+1.18$ y $+1.70$\,\%) y a RC2 ($9$--$0$--$1$); R2 sigue siendo la clase con menor
+diferencia ($+0.19$\,\%, $7$--$0$--$3$). El tiempo de CPU es un $7$\,\% menor para el
+Q-learning ($28.2$ frente a $30.2$~s).
+
+% ----------------------------------------------------------------------
+\subsubsection{600 clientes}
+\label{sec:exp-600}
+
+\begin{table}[H]
+\centering
+\caption{Gehring y Homberger, $600$ clientes: resultados por clase.}
+\label{tab:res-600}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}l ccc c c c c@{}}
+\toprule
+Clase & BKS NV / TD & ALNS NV / TD & ALNS-Q NV / TD & Menos NV (Q / A) & IMP TD (inst.) & GAP A / Q (inst.) & G--E--P \\
+\midrule
+C1 & 57.20 / 14296.1 & 57.67 / 14499.5 & 57.63 / 14264.2 & 1 / 1 & $+1.47$ (8) & 3.76 / 2.00 (6) & 8--1--1 \\
+C2 & 17.40 / 7571.3 & 18.27 / 7876.9 & 18.10 / 7735.8 & 7 / 1 & $+2.11$ (2) & -- (0) & 9--0--1 \\
+R1 & 54.50 / 17807.5 & 54.53 / 20320.7 & 54.53 / 20058.0 & 0 / 0 & $+1.23$ (10) & 13.91 / 12.42 (9) & 10--0--0 \\
+R2 & 11.00 / 12293.9 & 11.00 / 12988.1 & 11.00 / 12951.5 & 0 / 0 & $+0.35$ (10) & 5.74 / 5.36 (10) & 7--0--3 \\
+RC1 & 55.00 / 15943.0 & 55.01 / 17741.0 & 55.00 / 17286.2 & 1 / 0 & $+2.65$ (9) & 11.21 / 8.24 (9) & 10--0--0 \\
+RC2 & 11.40 / 10553.5 & 11.94 / 11080.7 & 11.94 / 10988.7 & 1 / 1 & $+0.67$ (8) & 8.39 / 7.51 (6) & 7--0--3 \\
+\midrule
+Global & 34.42 / 13077.6 & 34.74 / 14084.5 & 34.70 / 13880.7 & 10 / 3 & $+1.30$ (47) & 8.91 / 7.42 (40) & 51--1--8 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\textbf{Único tamaño con diferencia de flota significativa.} El Q-learning obtiene menos
+vehículos medios en $10$ instancias y el clásico en $3$ ($p=0.041$), sobre todo en C2 ($7$
+frente a $1$; $18.10$ frente a $18.27$ vehículos de media). Por corrida, con la misma semilla,
+el Q-learning usa menos vehículos en $37$ pares y el clásico en $15$. Aun así, la diferencia
+es pequeña en términos absolutos ($34.70$ frente a $34.74$ vehículos de media). En distancia,
+el IMP medio es $+1.30$\,\% ($47$ instancias; $41$ ganadas y $5$ perdidas; $p<0.001$) y la
+brecha auditada baja de $8.91$\,\% a $7.42$\,\% ($p<0.001$). El marcador es $51$--$1$--$8$.
+RC1 alcanza la mayor diferencia de todo el estudio ($+2.65$\,\%); el $+2.11$\,\% de C2 se
+calcula sobre solo $2$ instancias con la misma flota. El tiempo de CPU es un $7$\,\% mayor
+para el Q-learning ($37.3$ frente a $34.9$~s).
+
+% ----------------------------------------------------------------------
+\subsubsection{800 clientes}
+\label{sec:exp-800}
+
+\begin{table}[H]
+\centering
+\caption{Gehring y Homberger, $800$ clientes: resultados por clase.}
+\label{tab:res-800}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}l ccc c c c c@{}}
+\toprule
+Clase & BKS NV / TD & ALNS NV / TD & ALNS-Q NV / TD & Menos NV (Q / A) & IMP TD (inst.) & GAP A / Q (inst.) & G--E--P \\
+\midrule
+C1 & 74.90 / 25261.3 & 75.96 / 26100.1 & 75.85 / 25765.2 & 3 / 2 & $+1.50$ (5) & 4.84 / 2.86 (4) & 7--1--2 \\
+C2 & 23.10 / 11729.4 & 24.40 / 12459.1 & 24.35 / 12027.0 & 4 / 2 & $+2.04$ (4) & 0.06 / 0.04 (1) & 7--0--3 \\
+R1 & 72.80 / 31033.9 & 72.80 / 34202.5 & 72.80 / 33367.6 & 0 / 0 & $+2.43$ (10) & 10.19 / 7.49 (10) & 10--0--0 \\
+R2 & 15.00 / 19834.8 & 15.00 / 21010.5 & 15.00 / 20943.9 & 0 / 0 & $+0.30$ (10) & 6.04 / 5.72 (10) & 8--0--2 \\
+RC1 & 72.00 / 28660.6 & 73.00 / 31090.6 & 73.00 / 30448.6 & 0 / 0 & $+2.06$ (10) & -- (0) & 10--0--0 \\
+RC2 & 15.40 / 16409.0 & 16.10 / 17175.8 & 16.10 / 17085.7 & 2 / 2 & $+0.62$ (6) & 7.51 / 6.81 (5) & 8--0--2 \\
+\midrule
+Global & 45.53 / 22154.8 & 46.21 / 23673.1 & 46.18 / 23273.0 & 9 / 6 & $+1.50$ (45) & 7.31 / 5.92 (30) & 50--1--9 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\textbf{Mayor ventaja en distancia.} El IMP medio llega a $+1.50$\,\% ($45$ instancias con la
+misma flota; $41$ ganadas y $3$ perdidas; $p<0.001$) y la brecha auditada baja de $7.31$\,\% a
+$5.92$\,\% ($p<0.001$). Por corrida, en los pares con la misma flota, el Q-learning recorre
+menos en $424$ y el clásico en $102$. El marcador es $50$--$1$--$9$. La flota vuelve a ser
+equivalente ($46.18$ frente a $46.21$; $9$ frente a $6$ instancias; $p=0.13$); en RC1 ambos
+métodos usan $73$ vehículos en todas las corridas, uno más que el BKS, por lo que esa clase
+no entra en la brecha auditada (esto explica que la brecha media de $800$ sea menor que la de
+$600$: se promedia sobre un subconjunto distinto). R1 ($+2.43$\,\%) y RC1 ($+2.06$\,\%) son
+$10$--$0$--$0$. Las clases de horizonte largo son la parte débil: C2 ($7$--$0$--$3$) y RC2
+($8$--$0$--$2$) concentran $5$ de las $9$ derrotas, y en C2 ambos métodos quedan a más de un
+vehículo del BKS. El tiempo de CPU es un $8$\,\% mayor para el Q-learning ($54.0$ frente a
+$49.9$~s).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.48\textwidth]{../Experiments/figs/gh200/f2_parity.png}\hfill
+\includegraphics[width=0.48\textwidth]{../Experiments/figs/gh400/f2_parity.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{../Experiments/figs/gh600/f2_parity.png}\hfill
+\includegraphics[width=0.48\textwidth]{../Experiments/figs/gh800/f2_parity.png}
+\caption{Brecha auditada por instancia, ALNS clásico (abscisas) frente a ALNS-Q (ordenadas),
+en $200$, $400$, $600$ y $800$ clientes. Por debajo de la diagonal el Q-learning es mejor.
+Solo aparecen las instancias en que ambos igualan la flota del BKS.}
+\label{fig:paridad}
+\end{figure}
+
+\subsection{Dónde surge la ventaja de la propuesta}
+\label{sec:exp-ventaja}
+
+La Tabla~\ref{tab:imp-clase} cruza clase y tamaño, y resume lo observado en los apartados
+anteriores.
+
+\begin{table}[H]
+\centering
+\caption{IMP medio de distancia (\%, instancias con la misma flota) y marcador del
+Q-learning (G--E--P) por clase y tamaño.}
+\label{tab:imp-clase}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}l cc cc cc cc cc@{}}
+\toprule
+ & \multicolumn{2}{c}{$100$} & \multicolumn{2}{c}{$200$} & \multicolumn{2}{c}{$400$} & \multicolumn{2}{c}{$600$} & \multicolumn{2}{c}{$800$} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}\cmidrule(l){10-11}
+Clase & IMP & G--E--P & IMP & G--E--P & IMP & G--E--P & IMP & G--E--P & IMP & G--E--P \\
+\midrule
+C1 & 0.00 & 0--9--0 & $+0.23$ & 5--4--1 & $+1.18$ & 6--2--2 & $+1.47$ & 8--1--1 & $+1.50$ & 7--1--2 \\
+C2 & 0.00 & 0--8--0 & $+0.03$ & 6--2--2 & $+1.70$ & 8--0--2 & $+2.11$ & 9--0--1 & $+2.04$ & 7--0--3 \\
+R1 & $+0.12$ & 4--0--8 & $+0.51$ & 9--0--1 & $+1.41$ & 10--0--0 & $+1.23$ & 10--0--0 & $+2.43$ & 10--0--0 \\
+R2 & $+0.10$ & 5--0--6 & $+0.01$ & 6--0--4 & $+0.19$ & 7--0--3 & $+0.35$ & 7--0--3 & $+0.30$ & 8--0--2 \\
+RC1 & $-0.15$ & 2--0--6 & $+1.01$ & 10--0--0 & $+1.81$ & 10--0--0 & $+2.65$ & 10--0--0 & $+2.06$ & 10--0--0 \\
+RC2 & $-0.16$ & 3--0--5 & $+0.20$ & 7--0--3 & $+0.52$ & 9--0--1 & $+0.67$ & 7--0--3 & $+0.62$ & 8--0--2 \\
+\midrule
+Global & 0.00 & 14--17--25 & $+0.34$ & 43--6--11 & $+1.11$ & 50--2--8 & $+1.30$ & 51--1--8 & $+1.50$ & 50--1--9 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{enumerate}
+\item \textbf{Crece con el tamaño de la instancia.} En $100$ clientes no hay diferencia; a
+partir de $200$ el Q-learning es significativamente mejor y el IMP medio crece de forma
+monótona: $0.00$, $+0.34$, $+1.11$, $+1.30$ y $+1.50$\,\%. El marcador pasa de
+$14$--$17$--$25$ a $43$--$6$--$11$ en $200$ y se estabiliza en torno a $50$ de $60$
+instancias ganadas desde $400$.
+\item \textbf{Está en la distancia, no en la flota.} La flota media de los dos métodos
+difiere como mucho en $0.04$ vehículos por instancia en cada tamaño y solo es
+significativamente distinta en $600$ ($p=0.041$, concentrada en C2). La ventaja es una
+reducción de la longitud de las rutas \emph{con el mismo número de vehículos}, que es lo que
+optimiza la fase~2. No se ha medido por separado cuánto de esa ventaja se gesta en la fase~2 y
+cuánto en la solución que entrega la fase~1.
+\item \textbf{Es máxima en las clases de rutas cortas.} R1 y RC1 (ventanas estrechas, muchas
+rutas cortas: de $18$ a $73$ vehículos) son $10$--$0$--$0$ en todos los tamaños desde $400$
+(RC1 ya desde $200$), con IMP entre $+1.2$ y $+2.7$\,\%. C1 y C2 se suman desde $400$. Las
+clases de horizonte largo y pocas rutas, R2 y RC2, muestran la menor ventaja ($+0.2$ a
+$+0.7$\,\% desde $400$) y acumulan $21$ de las $36$ derrotas entre $200$ y $800$ clientes; en
+$800$, C2 y RC2 son el punto débil de la propuesta.
+\item \textbf{Coincide con un presupuesto escaso respecto del tamaño.} El presupuesto es el
+mismo en todos los tamaños ($T_{\max}=25\,000$) y el grado de destrucción está acotado a $60$
+clientes, de modo que el número de iteraciones de la fase~2 por cliente cae de $250$ en
+$n=100$ a unas $31$ en $n=800$, y cada iteración modifica una fracción cada vez menor de la solución. Las
+brechas de ambos métodos respecto del BKS crecen con $n$ (Tabla~\ref{tab:res-global-b}), es
+decir, hay más margen de mejora. Una explicación coherente con los datos, aunque no probada
+aquí, es que con pocas iteraciones por cliente elegir bien el operador pesa más, y que en
+Solomon el presupuesto sobra para que cualquier selección llegue al mismo resultado.
+\item \textbf{Costo computacional equivalente.} El tiempo de CPU difiere menos de un $10$\,\%
+en todos los tamaños, a favor del Q-learning en $200$ y $400$ y en contra en $600$ y $800$.
+Como los dos métodos ejecutan los mismos operadores, la diferencia refleja qué operadores
+elige cada uno (unos son más caros que otros, como el arrepentimiento sobre todas las rutas)
+y la carga del clúster, no el costo del aprendizaje, que es despreciable.
+\end{enumerate}
+
+En resumen, la ventaja de la propuesta no aparece en el banco de pruebas clásico de $100$
+clientes, donde ambos métodos empatan, sino a partir de $200$ clientes, y consiste en rutas
+entre un $0.3$ y un $1.5$\,\% más cortas en promedio con la misma flota, que crecen con el
+tamaño. Desde $400$ clientes la reducción es de $1.2$ a $2.7$\,\% en R1 y RC1, donde el
+Q-learning gana todas las instancias, mientras que en las clases de rutas largas (R2 y RC2)
+es menor y menos consistente.
